@@ -29,24 +29,17 @@ def extractCornersFromImage(filename):
 
     return img, corners
 
-def extractCorners(i):
-    img_left, corners_left = extractCornersFromImage("snapshots/left_%d.png" % i)
-    img_right, corners_right = extractCornersFromImage("snapshots/right_%d.png" % i)
-
-#    cv2.imshow("main", numpy.concatenate((img_left, img_right), 1))
-#    cv2.waitKey(0)
-
-    return [corners_left, corners_right]
-
 all_left_corners = []
 all_right_corners = []
 matching_left_corners = []
 matching_right_corners = []
 
+snapshots_dir = "snapshots/calibration"
+
 i = 1
-while os.path.isfile("snapshots/left_%d.png" % i):
-    img_left, corners_left = extractCornersFromImage("snapshots/left_%d.png" % i)
-    img_right, corners_right = extractCornersFromImage("snapshots/right_%d.png" % i)
+while os.path.isfile(os.path.join(snapshots_dir, "left_%d.png" % i)):
+    img_left, corners_left = extractCornersFromImage(os.path.join(snapshots_dir, "left_%d.png" % i))
+    img_right, corners_right = extractCornersFromImage(os.path.join(snapshots_dir, "right_%d.png" % i))
 
     if corners_left is not None and corners_right is not None:
         matching_left_corners.append(corners_left)
