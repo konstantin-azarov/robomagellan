@@ -1,5 +1,6 @@
 #include "libuvc/libuvc.h"
 #include "boost/format.hpp"
+#include "boost/program_options.hpp"
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
 #include <pthread.h>
@@ -9,6 +10,7 @@
 using namespace std;
 using boost::format;
 using boost::str;
+namespace po = boost::program_options;
 
 pthread_mutex_t frame_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -32,6 +34,19 @@ void cb(uvc_frame_t *frame, void *ptr) {
 }
 
 int main(int argc, char **argv) {
+  string snapshots_dir;
+
+  po::options_description desc("Command line options");
+  desc.add_options()
+      ("output-dir",
+       po::value<string>(&snapshots_dir)->required(),
+       "where to store snapshots")
+  ;
+
+  po::variables_map vm;
+  po::store(po::parse_command_line(argc, argv, desc), vm);
+  po::notify(vm);
+
   uvc_context_t *ctx;
   uvc_device_t *dev;
   uvc_device_handle_t *devh;
@@ -129,8 +144,8 @@ int main(int argc, char **argv) {
                 printf("Snapshot %d!\n", ++current_snapshot_index);
                 pthread_mutex_lock(&frame_lock);
 
-                cv::imwrite(str(format("snapshots/left_%d.png") % current_snapshot_index), last_frame_left);
-                cv::imwrite(str(format("snapshots/right_%d.png") % current_snapshot_index), last_frame_right);
+                cv::imwrite(str(format("%s/left_%d.png") % snapshots_dir % current_snapshot_index), last_frame_left);
+                cv::imwrite(str(format("%s/right_%d.png") % snapshots_dir % current_snapshot_index), last_frame_right);
 
                 pthread_mutex_unlock(&frame_lock);
                 break;
