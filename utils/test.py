@@ -183,11 +183,12 @@ def reprojectionError(X, f):
     return np.sum((Xp[0:2, :] - f)**2, 0)
 
 matches = []
-for (X1, dl1, dr1, fl, fr) in pts1:
+for (X1, dl1, dr1, fl1, fr1) in pts1:
     best = -1
     second = -1
     best_X2 = None
-    for (X2, dl2, dr2, fl, fr) in pts2:
+    best_fl2 = None
+    for (X2, dl2, dr2, fl2, fr2) in pts2:
         dist = (descDist(dl1, dl2) +
                 descDist(dl1, dr2) +
                 descDist(dr1, dl2) +
@@ -196,6 +197,7 @@ for (X1, dl1, dr1, fl, fr) in pts1:
             second = best
             best = dist
             best_X2 = X2
+            best_fl2 = fl2
         elif (second == -1 or dist < second):
             second = dist
     if (best != -1):
@@ -205,22 +207,22 @@ for (X1, dl1, dr1, fl, fr) in pts1:
             ratio = best/second
         if (ratio < 0.8):
             print X1, "->", ratio, best_X2
-            matches.append((X1, best_X2))
+            matches.append((X1, best_X2, fl1, best_fl2))
 
 print len(matches)
 
 W = np.zeros((len(matches), len(matches)))
 for i in xrange(len(matches)):
     for j in xrange(len(matches)):
-        a1, a2 = matches[i]
-        b1, b2 = matches[j]
+        a1, a2, _, _ = matches[i]
+        b1, b2, _, _ = matches[j]
         W[i, j] = abs((np.linalg.norm(a1 - a2) - np.linalg.norm(b1 - b2))) < 2
 
 def estimate_from_clique(C):
     X = []
     Y = []
     for i in C:
-        x, y = matches[i]
+        x, y, _, _ = matches[i]
         X.append(x)
         Y.append(y)
         print i, x, y, np.linalg.norm(x - y)
@@ -233,13 +235,34 @@ def estimate_from_clique(C):
 
     return R, t, d
 
+def reprojectionErrorForMatches(C):
+    X = np.array([matches[i][0] for i in C]).transpose()
+    Y = np.array([matches[i][1] for i in C]).transpose()
+    f1 = np.array([matches[i][2] for i in C]).transpose()
+    f2 = np.array([matches[i][3] for i in C]).transpose()
+
+    ab = reprojectionError(np.dot(R, Y) + t, f1)
+    ba = reprojectionError(np.dot(R.transpose(), X) - t, f2)
+
+    return ab, ba
+
 C = clique(W)
 R, t, d = estimate_from_clique(C)
 
+ab, ba = reprojectionErrorForMatches(C)
+print "repr Y -> f1 = ", ab
+print "repr X -> f2 = ", ba
+
 print "d = ", d
+
 cc = map(lambda (i, _): i, filter(lambda (i, d): d < 100, zip(C, d)))
 R, t, d = estimate_from_clique(cc)
+
 
 print "R = ", R
 print "t = ", t, np.linalg.norm(t)
 print "d = ", d
+
+ab, ba = reprojectionErrorForMatches(cc)
+print "repr Y -> f1 = ", ab
+print "repr X -> f2 = ", ba
