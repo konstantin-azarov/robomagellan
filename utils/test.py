@@ -5,6 +5,8 @@ import sys
 import random
 import time
 
+from rigid_estimator import estimate_rotation
+
 # dl.reshape(dl.size)[4] = 0
 # dr.reshape(dr.size)[4] = 0
 
@@ -54,14 +56,40 @@ def speedTest():
 
 # speedTest()
 # sys.exit(0)
+def clique(W):
+    n = len(W)
+    d = np.sum(W, 0)
+    res = set()
 
+    while True:
+        best = 0
+        best_i = -1
+        for i in xrange(n):
+            if i not in res:
+                good = True
+                for j in res:
+                    if not W[i, j]:
+                        good = False
+                if (good):
+                    if (d[i] > best):
+                        best = d[i]
+                        best_i = i
+        if (best_i == -1):
+            break
+
+        res.add(best_i)
+        for j in xrange(n):
+            if W[i, j]:
+                d[j] -= 1
+
+    return list(res)
 
 def descDist(d1, d2):
     return np.linalg.norm(d1 - d2)
 
-def processImagePair(index):
-    left = cv2.imread("utils/snapshots/test/left_%d.png" % index)
-    right = cv2.imread("utils/snapshots/test/right_%d.png" % index)
+def processImagePair(kind, index):
+    left = cv2.imread("utils/snapshots/test/%s/left_%d.png" % (kind, index))
+    right = cv2.imread("utils/snapshots/test/%s/right_%d.png" % (kind, index))
     if left is None or right is None:
         return False
 
@@ -70,10 +98,10 @@ def processImagePair(index):
     left1 = cv2.remap(left, mlx, mly, cv2.INTER_LINEAR)
     right1 = cv2.remap(right, mrx, mry, cv2.INTER_LINEAR)
 
-    sift = cv2.xfeatures2d.SURF_create()
+    sift = cv2.xfeatures2d.SIFT_create()
     kpsl, descsl = sift.detectAndCompute(left1,None)
 
-    sift = cv2.xfeatures2d.SURF_create()
+    sift = cv2.xfeatures2d.SIFT_create()
     kpsr, descsr = sift.detectAndCompute(right1,None)
 
     def findKpIndex(kps, x, y, delta):
@@ -96,7 +124,7 @@ def processImagePair(index):
             if len(candidates) > 1:
                 ratio = candidates[0][0]/candidates[1][0]
             else:
-                ratio = 1.0
+                ratio = 0
 
             if ratio < 0.8:
                 c = candidates[0][1]
@@ -107,7 +135,7 @@ def processImagePair(index):
                 #print kpl.pt, ":", ratio, c.pt[1] - kpl.pt[1], X
 
                 matches.append((i, candidates[0][2]))
-                res.append((X, descl, descsr[candidates[0][2]]))
+                res.append((X, descl, descsr[candidates[0][2]], kpl.pt, c.pt))
 
     # def rndPt(p):
     #     return (int(round(p[0])), int(round(p[1])))
@@ -143,16 +171,23 @@ def processImagePair(index):
 
     return res
 
+experiment = "translation"
+pts1 = processImagePair(experiment, 1)
+pts2 = processImagePair(experiment, 5)
 
-pts1 = processImagePair(1)
-pts2 = processImagePair(2)
+def reprojectionError(X, f):
+    res = []
+    P = Pl[0:3, 0:3]
+    Xp = np.dot(P, X)
+    Xp /= np.tile(Xp[2, :], (3, 1))
+    return np.sum((Xp[0:2, :] - f)**2, 0)
 
 matches = []
-for (X1, dl1, dr1) in pts1:
+for (X1, dl1, dr1, fl, fr) in pts1:
     best = -1
     second = -1
     best_X2 = None
-    for (X2, dl2, dr2) in pts2:
+    for (X2, dl2, dr2, fl, fr) in pts2:
         dist = (descDist(dl1, dl2) +
                 descDist(dl1, dr2) +
                 descDist(dr1, dl2) +
@@ -165,7 +200,7 @@ for (X1, dl1, dr1) in pts1:
             second = dist
     if (best != -1):
         if (second == -1):
-            ratio = 1
+            ratio = 0
         else:
             ratio = best/second
         if (ratio < 0.8):
@@ -177,14 +212,34 @@ print len(matches)
 W = np.zeros((len(matches), len(matches)))
 for i in xrange(len(matches)):
     for j in xrange(len(matches)):
-        a1, b1 = matches[i]
-        a2, b2 = matches[j]
-        W[i, j] = abs((np.linalg.norm(a1 - a2) - np.linalg.norm(b1 - b2))) < 30
+        a1, a2 = matches[i]
+        b1, b2 = matches[j]
+        W[i, j] = abs((np.linalg.norm(a1 - a2) - np.linalg.norm(b1 - b2))) < 2
 
+def estimate_from_clique(C):
+    X = []
+    Y = []
+    for i in C:
+        x, y = matches[i]
+        X.append(x)
+        Y.append(y)
+        print i, x, y, np.linalg.norm(x - y)
 
+    X = np.array(X).transpose()
+    Y = np.array(Y).transpose()
 
-print W
-print np.sum(W, 0)
-# i = 1
-# while processImagePair(i):
-#     i+=1
+    R, t = estimate_rotation(Y, X)
+    d = np.sum((np.dot(R, Y) + t - X)**2, 0)
+
+    return R, t, d
+
+C = clique(W)
+R, t, d = estimate_from_clique(C)
+
+print "d = ", d
+cc = map(lambda (i, _): i, filter(lambda (i, d): d < 100, zip(C, d)))
+R, t, d = estimate_from_clique(cc)
+
+print "R = ", R
+print "t = ", t, np.linalg.norm(t)
+print "d = ", d
