@@ -1,47 +1,84 @@
-#include "libuvc/libuvc.h"
-#include "boost/format.hpp"
-#include "boost/program_options.hpp"
+#include <libuvc/libuvc.h>
+#include <boost/format.hpp>
+#include <boost/program_options.hpp>
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
 #include <pthread.h>
 #include <string>
 #include <iostream>
 
+#include "frame_buffer_queue.hpp"
+
 using namespace std;
 using boost::format;
 using boost::str;
+
 namespace po = boost::program_options;
 
-pthread_mutex_t frame_lock = PTHREAD_MUTEX_INITIALIZER;
+const int FRAME_WIDTH = 640;
+const int FRAME_HEIGHT = 480;
+const int FRAME_SIZE = FRAME_WIDTH*FRAME_HEIGHT;
 
-cv::Mat last_frame_left(480, 640, CV_8UC1),
-        last_frame_right(480, 640, CV_8UC1);
+FrameBufferQueue fb_queue(FRAME_SIZE*2, 10);
 
 int frame_counter = 0;
 
+uint8_t tmp_buffer[FRAME_SIZE*2];
+
 void cb(uvc_frame_t *frame, void *ptr) {
   uint8_t* data = static_cast<uint8_t*>(frame->data);
-  uint8_t* left_data = last_frame_left.data;
-  uint8_t* right_data = last_frame_right.data;
+  uint8_t* left_data = tmp_buffer;
+  uint8_t* right_data = tmp_buffer + FRAME_WIDTH;
 
-  pthread_mutex_lock(&frame_lock);
-  for (int i=0; i < frame->data_bytes >> 1; ++i) {
-    *(left_data++) = *(data++);
-    *(right_data++) = *(data++);
+  for (int i = 0; i < FRAME_HEIGHT; ++i) {
+    for (int j = 0; j < FRAME_WIDTH; ++j) {
+      *(left_data++) = *(data++);
+      *(right_data++) = *(data++);
+    }
+    left_data += FRAME_WIDTH;
+    right_data += FRAME_WIDTH;
   }
+
   frame_counter++;
-  pthread_mutex_unlock(&frame_lock);
+
+  if (frame_counter != frame->sequence) {
+    cout << "Missed frame(s): "
+         << frame_counter << " " << frame->sequence << endl;
+    frame_counter = frame->sequence;
+  }
+
+  fb_queue.addFrame(tmp_buffer);
+}
+
+void uncombine(const uint8_t* data, uint8_t* left_data, uint8_t* right_data) {
+  for (int i=0; i < FRAME_HEIGHT; ++i) {
+    for (int j=0; j < FRAME_WIDTH; ++j) {
+      *(left_data++) = *data;
+      *(right_data++) = *(data + FRAME_WIDTH);
+      data++;
+    }
+    data += FRAME_WIDTH;
+  }
+}
+
+void fail(const char* msg) {
+  cerr << msg << endl;
+  exit(1);
 }
 
 int main(int argc, char **argv) {
-  string snapshots_dir;
+  string snapshots_dir, output_file;
 
   po::options_description desc("Command line options");
   desc.add_options()
       ("output-dir",
        po::value<string>(&snapshots_dir)->required(),
-       "where to store snapshots")
-  ;
+       "where to store snapshots");
+
+  desc.add_options()
+      ("output-file",
+       po::value<string>(&output_file),
+       "where to store outpit video file");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -121,33 +158,65 @@ int main(int argc, char **argv) {
         if (res < 0) {
           uvc_perror(res, "start_streaming"); /* unable to start stream */
         } else {
-          puts("Streaming...");
+          FILE* ffmpeg = 0;
+
+          if (!output_file.empty()) {
+            std::string cmd = string("ffmpeg ") +
+                "-f rawvideo " +
+                "-pix_fmt gray " +
+                "-s 1280x480 " +
+                "-r 30 " +
+                "-i - " +
+                "-r 30 " +
+                "-c:v libx264 " +
+                "-preset ultrafast " +
+                "-qp 0 " +
+                "-an " +
+                "-f avi " +
+                "-y " +
+                output_file;
+
+            cout << "Running ffmpeg: " << cmd << endl;
+
+            ffmpeg = popen(cmd.c_str(), "w");
+            if (ffmpeg == 0) {
+              fail("Failed to open ffmpeg");
+            }
+          }
+
           cv::namedWindow("preview");
+
+          uint8_t buffer[FRAME_SIZE*2];
+
+          cv::Mat combined(FRAME_HEIGHT, FRAME_WIDTH*2, CV_8UC1, buffer);
+          cv::Mat left(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC1);
+          cv::Mat right(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC1);
 
           uvc_set_ae_mode(devh, 1); /* e.g., turn on auto exposure */
 
-          cv::Mat combined;
           int current_snapshot_index = 0;
           bool done = false;
           while(!done) {
-            pthread_mutex_lock(&frame_lock);
-            cv::hconcat(last_frame_left, last_frame_right, combined);
-            pthread_mutex_unlock(&frame_lock);
+            fb_queue.nextFrame(buffer);
+
             cv::imshow("preview", combined);
 
-            int key = cv::waitKey(40);
+            if (ffmpeg != 0) {
+              fwrite(buffer, 1, FRAME_SIZE*2, ffmpeg);
+            }
+
+            int key = cv::waitKey(1);
             switch (key) {
               case 27:
                 done = true;
                 break;
               case 32:
                 printf("Snapshot %d!\n", ++current_snapshot_index);
-                pthread_mutex_lock(&frame_lock);
 
-                cv::imwrite(str(format("%s/left_%d.png") % snapshots_dir % current_snapshot_index), last_frame_left);
-                cv::imwrite(str(format("%s/right_%d.png") % snapshots_dir % current_snapshot_index), last_frame_right);
+                uncombine(buffer, left.ptr(), right.ptr());
+                cv::imwrite(str(format("%s/left_%d.png") % snapshots_dir % current_snapshot_index), left);
+                cv::imwrite(str(format("%s/right_%d.png") % snapshots_dir % current_snapshot_index), right);
 
-                pthread_mutex_unlock(&frame_lock);
                 break;
               case -1:
                 break;
@@ -156,6 +225,8 @@ int main(int argc, char **argv) {
                 break;
             }
           }
+
+          pclose(ffmpeg);
 
           /* End the stream. Blocks until last callback is serviced */
           uvc_stop_streaming(devh);
