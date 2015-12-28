@@ -1,4 +1,4 @@
 .PHONY: utils
 
 utils:
-	$(MAKE) -C utils
+	$(MAKE) -C utils all

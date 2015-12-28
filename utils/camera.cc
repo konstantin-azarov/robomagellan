@@ -136,8 +136,6 @@ void Camera::shutdown() {
 
   delete queue_;
   delete tmp_buffer_;
-
-  cout << "Camera shutdown" << endl;
 }
 
 void Camera::nextFrame(uint8_t* frame) {

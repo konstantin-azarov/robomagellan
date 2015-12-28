@@ -2,10 +2,14 @@ SRCS := $(wildcard *.cc)
 
 HDRS := $(wildcard *.hpp)
 
-bin/capture: $(SRCS) $(HDRS)
-	g++ -luvc \
-	    -lopencv_core \
-			-lopencv_imgcodecs \
-			-lopencv_highgui \
-			-lboost_program_options \
-			-o bin/capture $(SRCS)
+PREVIEW ?= y
+
+LIBS = -luvc -lopencv_core -lopencv_imgcodecs -lboost_program_options
+
+capture: $(SRCS) $(HDRS)
+	g++ $(LIBS) -lopencv_highgui -o bin/capture $(SRCS)
+
+capture_no_preview: $(SRCS) $(HDRS)
+	g++ $(LIBS) -DNO_PREVIEW -o bin/capture_no_preview $(SRCS)
+
+all: capture capture_no_preview

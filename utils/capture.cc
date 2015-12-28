@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <string>
 #include <iostream>
+#include <ctime>
 
 #include "camera.hpp"
 
@@ -17,6 +18,7 @@ namespace po = boost::program_options;
 const int FRAME_WIDTH = 640;
 const int FRAME_HEIGHT = 480;
 const int FRAME_SIZE = FRAME_WIDTH*FRAME_HEIGHT;
+const int FPS = 30;
 
 void uncombine(const uint8_t* data, uint8_t* left_data, uint8_t* right_data) {
   for (int i=0; i < FRAME_HEIGHT; ++i) {
@@ -36,24 +38,37 @@ void fail(const char* msg) {
 
 int main(int argc, char **argv) {
   string snapshots_dir, output_file;
+  int video_duration = -1;
 
   po::options_description desc("Command line options");
   desc.add_options()
       ("output-dir",
        po::value<string>(&snapshots_dir)->required(),
        "where to store snapshots");
-
   desc.add_options()
       ("output-file",
        po::value<string>(&output_file),
        "where to store outpit video file");
+  desc.add_options()
+      ("duration",
+       po::value<int>(&video_duration),
+       "how long to record the video for");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
 
+  #ifdef NO_PREVIEW
+  if (output_file.empty()) {
+    fail("Output file is required");
+  }
+  if (video_duration == -1) {
+    fail("Video duration is required");
+  }
+  #endif
+
   Camera camera;
-  camera.init(FRAME_WIDTH, FRAME_HEIGHT, 30);
+  camera.init(FRAME_WIDTH, FRAME_HEIGHT, FPS);
 
   FILE* ffmpeg = 0;
 
@@ -81,7 +96,9 @@ int main(int argc, char **argv) {
     }
   }
 
+#ifndef NO_PREVIEW
   cv::namedWindow("preview");
+#endif
 
   uint8_t buffer[FRAME_SIZE*2];
 
@@ -91,15 +108,24 @@ int main(int argc, char **argv) {
 
   int current_snapshot_index = 0;
   bool done = false;
+  int frame_count = 0;
   while(!done) {
     camera.nextFrame(buffer);
+    frame_count++;
 
+#ifndef NO_PREVIEW
     cv::imshow("preview", combined);
+#endif
 
     if (ffmpeg != 0) {
       fwrite(buffer, 1, FRAME_SIZE*2, ffmpeg);
     }
 
+    if (video_duration != -1 && frame_count >= video_duration*FPS) {
+      done = true;
+    }
+
+#ifndef NO_PREVIEW
     int key = cv::waitKey(1);
     switch (key) {
       case 27:
@@ -119,6 +145,7 @@ int main(int argc, char **argv) {
         printf("Unknown code %d\n", key);
         break;
     }
+#endif
   }
 
   pclose(ffmpeg);
