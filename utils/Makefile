@@ -4,7 +4,7 @@ HDRS := $(wildcard *.hpp)
 
 PREVIEW ?= y
 
-LIBS = -luvc -lopencv_core -lopencv_imgcodecs -lboost_program_options
+LIBS = -luvc -lopencv_core -lboost_program_options
 
 capture: $(SRCS) $(HDRS)
 	g++ $(LIBS) -lopencv_highgui -o bin/capture $(SRCS)
