@@ -151,6 +151,13 @@ void Camera::callback(uvc_frame_t* frame) {
   uint8_t* left_data = tmp_buffer_;
   uint8_t* right_data = tmp_buffer_ + frame_width_;
 
+  frame_counter_++;
+
+  if (frame->data_bytes != frame_width_*frame_height_*2) {
+    cerr << "Incomplete frame: " << frame->sequence << endl;
+    return;
+  }
+
   for (int i = 0; i < frame_height_; ++i) {
     for (int j = 0; j < frame_width_; ++j) {
       *(left_data++) = *(data++);
@@ -160,10 +167,9 @@ void Camera::callback(uvc_frame_t* frame) {
     right_data += frame_width_;
   }
 
-  frame_counter_++;
 
   if (frame_counter_ != frame->sequence) {
-    cout << "Missed frame(s): "
+    cerr << "Missed frame(s): "
          << frame_counter_ << " " << frame->sequence << endl;
     frame_counter_ = frame->sequence;
   }
