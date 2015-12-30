@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <string>
 #include <iostream>
+#include <iomanip>
 #include <ctime>
 
 #include "camera.hpp"
@@ -37,7 +38,7 @@ void fail(const char* msg) {
 }
 
 int main(int argc, char **argv) {
-  string snapshots_dir, output_file;
+  string snapshots_dir, output_file, video_format;
   int video_duration = -1;
 
   po::options_description desc("Command line options");
@@ -53,6 +54,10 @@ int main(int argc, char **argv) {
       ("duration",
        po::value<int>(&video_duration),
        "how long to record the video for");
+  desc.add_options()
+      ("format",
+       po::value<string>(&video_format)->default_value("raw"),
+       "raw or x264");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -67,32 +72,47 @@ int main(int argc, char **argv) {
   }
   #endif
 
-  Camera camera;
-  camera.init(FRAME_WIDTH, FRAME_HEIGHT, FPS);
+  if (video_format != "raw" && video_format != "x264") {
+    fail("--video_format should be either 'raw' or 'x264'");
+  }
 
-  FILE* ffmpeg = 0;
+  Camera camera;
+  if (!camera.init(FRAME_WIDTH, FRAME_HEIGHT, FPS)) {
+    fail("Failed to initialize camera");
+  }
+
+  FILE* video_sink = 0;
 
   if (!output_file.empty()) {
-    std::string cmd = string("ffmpeg ") +
-        "-f rawvideo " +
-        "-pix_fmt gray " +
-        "-s 1280x480 " +
-        "-r 30 " +
-        "-i - " +
-        "-r 30 " +
-        "-c:v libx264 " +
-        "-preset ultrafast " +
-        "-qp 0 " +
-        "-an " +
-        "-f avi " +
-        "-y " +
-        output_file;
+    if (video_format == "x264") {
+      std::string cmd = string("ffmpeg ") +
+          "-f rawvideo " +
+          "-pix_fmt gray " +
+          "-s 1280x480 " +
+          "-r 30 " +
+          "-i - " +
+          "-r 30 " +
+          "-c:v libx264 " +
+          "-preset ultrafast " +
+          "-qp 0 " +
+          "-an " +
+          "-f avi " +
+          "-y " +
+          output_file;
 
-    cout << "Running ffmpeg: " << cmd << endl;
+      cout << "Running ffmpeg: " << cmd << endl;
 
-    ffmpeg = popen(cmd.c_str(), "w");
-    if (ffmpeg == 0) {
-      fail("Failed to open ffmpeg");
+      video_sink = popen(cmd.c_str(), "w");
+      if (video_sink == 0) {
+        fail("Failed to open ffmpeg");
+      }
+    } else if (video_format == "raw") {
+      video_sink = fopen(output_file.c_str(), "wb");
+      if (video_sink == 0) {
+        fail("Failed to open output file");
+      }
+    } else {
+      fail("Invalid video format");
     }
   }
 
@@ -106,9 +126,13 @@ int main(int argc, char **argv) {
   cv::Mat left(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC1);
   cv::Mat right(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC1);
 
+  cout << "Recoding" << endl;
+
   int current_snapshot_index = 0;
   bool done = false;
   int frame_count = 0;
+  std::time_t last_timestamp = std::time(0);
+  int fps_frame_count = 0;
   while(!done) {
     camera.nextFrame(buffer);
     frame_count++;
@@ -117,8 +141,17 @@ int main(int argc, char **argv) {
     cv::imshow("preview", combined);
 #endif
 
-    if (ffmpeg != 0) {
-      fwrite(buffer, 1, FRAME_SIZE*2, ffmpeg);
+    if (video_sink != 0) {
+      fwrite(buffer, 1, FRAME_SIZE*2, video_sink);
+    }
+
+    fps_frame_count++;
+    std::time_t t = std::time(0);
+    if (t - last_timestamp >= 2) {
+      cout << "\rFPS = " << setprecision(3)
+        << (fps_frame_count / static_cast<double>(t - last_timestamp)) << flush;
+      last_timestamp = t;
+      fps_frame_count = 0;
     }
 
     if (video_duration != -1 && frame_count >= video_duration*FPS) {
@@ -148,7 +181,13 @@ int main(int argc, char **argv) {
 #endif
   }
 
-  pclose(ffmpeg);
+  cout << endl;
+
+  if (video_format == "x264"){
+    pclose(video_sink);
+  } else {
+    fclose(video_sink);
+  }
 
   camera.shutdown();
 
