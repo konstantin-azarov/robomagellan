@@ -1,7 +1,10 @@
 #include <pthread.h>
 #include <cstring>
+#include <iostream>
 
 #include "frame_buffer_queue.hpp"
+
+using namespace std;
 
 FrameBufferQueue::FrameBufferQueue(int frame_size, int max_length) {
   frame_size_ = frame_size;
@@ -25,14 +28,18 @@ FrameBufferQueue::~FrameBufferQueue() {
 
 void FrameBufferQueue::addFrame(const uint8_t* data) {
   pthread_mutex_lock(&lock_);
-  memcpy(
-    framePtr_(write_index_),
-    data,
-    frame_size_);
+  if (current_size_ < max_length_) {
+    memcpy(
+      framePtr_(write_index_),
+      data,
+      frame_size_);
 
-  write_index_ = (write_index_ + 1) % max_length_;
-  current_size_++;
-  pthread_cond_signal(&cond_var_);
+    write_index_ = (write_index_ + 1) % max_length_;
+    current_size_++;
+    pthread_cond_signal(&cond_var_);
+  } else {
+    cerr << "Queue overflow" << endl;
+  }
   pthread_mutex_unlock(&lock_);
 }
 

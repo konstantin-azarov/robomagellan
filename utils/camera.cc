@@ -13,6 +13,8 @@ using namespace std;
 #define VENDOR_ID 0x2a0b
 #define PRODUCT_ID 0x00f5
 
+#define CAMERA_DEBUG
+
 Camera::Camera() {
   ctx_ = 0;
   dev_ = 0;
@@ -29,7 +31,7 @@ bool Camera::init(int width, int height, int fps) {
   frame_counter_ = 0;
   tmp_buffer_ = new uint8_t[width*height*2];
 
-  queue_ = new FrameBufferQueue(width*height*2, 10);
+  queue_ = new FrameBufferQueue(width*height*2, 60*10);
 
   uvc_stream_ctrl_t ctrl;
   uvc_error_t res;
@@ -107,7 +109,7 @@ bool Camera::init(int width, int height, int fps) {
     return false;
   }
 
-  uvc_set_ae_mode(devh_, 1); /* e.g., turn on auto exposure */
+  //uvc_set_ae_mode(devh_, 1); /* e.g., turn on auto exposure */
 
   /* Start the video stream. The library will call user function cb:
    *   cb(frame, (void*) 12345)
@@ -152,9 +154,12 @@ void Camera::callback(uvc_frame_t* frame) {
   uint8_t* right_data = tmp_buffer_ + frame_width_;
 
   frame_counter_++;
+//  if (frame_counter_ % 2 == 0) {
+//    return;
+//  }
 
   if (frame->data_bytes != frame_width_*frame_height_*2) {
-    cerr << "Incomplete frame: " << frame->sequence << endl;
+    cerr << "Incomplete frame: " << frame->sequence << " " << frame->data_bytes << endl;
     return;
   }
 
