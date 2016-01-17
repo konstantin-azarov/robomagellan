@@ -11,8 +11,8 @@ executable('capture',
     'frame_buffer_queue.cc'],
   dependencies: [opencv, boost_options, uvc])
 
-executable('replay',
+executable('process',
   sources : [
-    'replay.cc',
+    'process.cc',
     'raw_video_reader.cc'],
-  dependencies: [ opencv ] )
+  dependencies: [ opencv, boost_options ] )
