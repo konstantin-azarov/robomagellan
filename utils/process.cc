@@ -10,21 +10,27 @@ namespace po = boost::program_options;
 const int frame_width = 640;
 const int frame_height = 480;
 
-int main(int argc, char** argv) {
-  cv::FileStorage fs("test.yml", cv::FileStorage::WRITE);
+struct CalibData {
+  cv::Mat Ml, dl, Mr, dr, R, T;
 
-  cv::Mat_<double> m1(3, 3), m2(3, 3);
+  static CalibData read(const string& filename) {
+    cv::FileStorage fs(filename, cv::FileStorage::READ);
 
-  for (int i=0; i < 3; ++i) {
-    m1(0, i) = i;
-    m2(0, i) = -i;
+    CalibData res;
+    fs["Ml"] >> res.Ml;
+    fs["dl"] >> res.dl;
+    fs["Mr"] >> res.Mr;
+    fs["dr"] >> res.dr;
+    fs["R"] >> res.R;
+    fs["T"] >> res.T;
+
+    return res;
   }
+};
 
-  fs << "m1" << m1 << "m2" << m2;
-  fs.release();
-  
 
-  string video_file;
+int main(int argc, char** argv) {
+  string video_file, calib_file;
   int fps;
 
   po::options_description desc("Command line options");
@@ -37,11 +43,17 @@ int main(int argc, char** argv) {
       ("fps",
        po::value<int>(&fps)->required(),
        "video frame rate");
-  
 
+  desc.add_options()
+      ("calib-file",
+       po::value<string>(&calib_file)->default_value("data/calib.yml"),
+       "path to the calibration file");
+ 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
+  
+  CalibData calib = CalibData::read(calib_file);
 
   RawVideoReader rdr(video_file, frame_width*2, frame_height);
   uint8_t frame_data[frame_width*2*frame_height];

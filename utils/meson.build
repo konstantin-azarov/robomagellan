@@ -2,7 +2,7 @@ project('robomagellan', 'cpp')
 
 opencv = dependency('opencv')
 boost_options = dependency('boost', modules: ['program_options'])
-uvc = find_library('uvc')
+uvc = find_library('uvc', required : false)
 
 executable('capture', 
   sources : [
