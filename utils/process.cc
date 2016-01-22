@@ -2,6 +2,9 @@
 #include <opencv2/opencv.hpp>
 
 #include "raw_video_reader.h"
+#include "average.hpp"
+#include "fps_meter.hpp"
+#include "timer.hpp"
 
 using namespace std;
 
@@ -58,14 +61,58 @@ int main(int argc, char** argv) {
   RawVideoReader rdr(video_file, frame_width*2, frame_height);
   uint8_t frame_data[frame_width*2*frame_height];
   cv::Mat frame_mat(frame_height, frame_width*2, CV_8UC1, frame_data);
+  cv::Mat render_mat(frame_height, frame_width*2, CV_8UC2);
 
   cv::namedWindow("video");
 
-  bool done = false;
-  while (rdr.nextFrame(frame_data) && !done) {
-    cv::imshow("video", frame_mat);
+  Timer timer;
+  Average readTime(fps), renderTime(fps), presentTime(fps);
+  FpsMeter fpsMeter(fps);
 
-    int key = cv::waitKey(1000.0/fps);
+  double frameTime = nanoTime();
+  double frameDt = 1.0/fps;
+
+  bool done = false;
+  while (!done) {
+    timer.mark();
+    
+    if (!rdr.nextFrame(frame_data)) {
+      break;
+    }
+
+    readTime.sample(timer.mark());
+
+
+    // Render
+    char buf[1024];
+    snprintf(
+        buf, 
+        sizeof(buf),
+        "read_time = %.3f, render_time = %.3f, wait_time = %.3f fps = %.2f", 
+        readTime.value(), 
+        renderTime.value(),
+        presentTime.value(), 
+        fpsMeter.currentFps());
+
+    cv::cvtColor(frame_mat, render_mat, CV_GRAY2RGB);
+    cv::putText(
+        render_mat, 
+        buf, 
+        cv::Point(0, frame_height), 
+        cv::FONT_HERSHEY_PLAIN, 
+        1.0, 
+        cv::Scalar(0, 255, 0));
+
+    cv::imshow("video", render_mat);
+
+    renderTime.sample(timer.mark());
+    fpsMeter.mark();
+
+    // Wait for next frame
+    frameTime += frameDt;
+    long wait = max(1, static_cast<int>((frameTime - nanoTime())*1000));
+
+    int key = cv::waitKey(wait);
     if (key != -1) {
       key &= 0xFF;
     }
@@ -74,6 +121,8 @@ int main(int argc, char** argv) {
         done = true;
         break;
     }
+
+    presentTime.sample(timer.mark());
   }
 
   return 0;

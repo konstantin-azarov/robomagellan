@@ -6,9 +6,9 @@
 #include <string>
 #include <iostream>
 #include <iomanip>
-#include <ctime>
 
 #include "camera.hpp"
+#include "utils.hpp"
 
 using namespace std;
 using boost::format;
@@ -35,12 +35,6 @@ void uncombine(const uint8_t* data, uint8_t* left_data, uint8_t* right_data) {
 void fail(const char* msg) {
   cerr << msg << endl;
   exit(1);
-}
-
-double nano_time() {
-  timespec t;
-  clock_gettime(CLOCK_REALTIME, &t);
-  return t.tv_sec + (t.tv_nsec / 1E+9);
 }
 
 FILE* open_video_sink(string video_format, string output_file) {

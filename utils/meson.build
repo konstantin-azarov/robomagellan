@@ -14,5 +14,6 @@ executable('capture',
 executable('process',
   sources : [
     'process.cc',
+    'utils.cc',
     'raw_video_reader.cc'],
   dependencies: [ opencv, boost_options ] )
