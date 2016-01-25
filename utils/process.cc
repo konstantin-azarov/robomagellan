@@ -31,6 +31,71 @@ struct CalibData {
   }
 };
 
+struct UndistortMaps {
+  cv::Mat x, y;
+};
+
+class FrameProcessor {
+  private:
+    const int LEFT = 0;
+    const int RIGHT = 1;
+
+  public:
+    FrameProcessor(const CalibData& calib, int width, int height) {
+
+      cv::stereoRectify(
+          calib.Ml, calib.dl, 
+          calib.Mr, calib.dr, 
+          cv::Size(width, height),
+          calib.R, calib.T,
+          Rl_, Rr_,
+          Pl_, Pr_,
+          Q_,
+          cv::CALIB_ZERO_DISPARITY,
+          0); 
+
+      cout << "Ml = " << calib.Ml << endl << "d = " << calib.dl << endl;
+
+      cv::initUndistortRectifyMap(
+          calib.Ml, calib.dl, Rl_, Pl_, 
+          cv::Size(width, height),
+          CV_16SC2,
+          maps_[LEFT].x, maps_[LEFT].y );
+
+      cv::initUndistortRectifyMap(
+          calib.Mr, calib.dr, Rr_, Pr_, 
+          cv::Size(width, height),
+          CV_16SC2,
+          maps_[RIGHT].x, maps_[RIGHT].y);
+    }
+
+    void process(const cv::Mat src[], cv::Mat& debug) {
+      for (int i=0; i < 2; ++i) {
+        cv::remap(
+            src[i], 
+            undistorted_image_[i], 
+            maps_[i].x, 
+            maps_[i].y, 
+            cv::INTER_LINEAR);
+      }
+
+      hconcat(undistorted_image_[0], undistorted_image_[1], debug);
+
+      cv::Surf surf;
+      
+    }
+
+  private:
+    cv::Mat Rl_, Pl_, Rr_, Pr_, Q_;
+
+    UndistortMaps maps_[2];
+
+    cv::Mat undistorted_image_[2];
+
+    vector<cv::KeyPoint> keypoints_;
+    cv::Mat descriptors_;
+};
+
 
 int main(int argc, char** argv) {
   string video_file, calib_file;
@@ -58,15 +123,25 @@ int main(int argc, char** argv) {
   
   CalibData calib = CalibData::read(calib_file);
 
+  FrameProcessor processor(calib, frame_width, frame_height);
+
   RawVideoReader rdr(video_file, frame_width*2, frame_height);
   uint8_t frame_data[frame_width*2*frame_height];
   cv::Mat frame_mat(frame_height, frame_width*2, CV_8UC1, frame_data);
+  cv::Mat mono_frames[] = {
+    frame_mat(cv::Range::all(), cv::Range(0, frame_width)),
+    frame_mat(cv::Range::all(), cv::Range(frame_width, frame_width*2))
+  };
+  cv::Mat debug_mat;
   cv::Mat render_mat(frame_height, frame_width*2, CV_8UC2);
 
   cv::namedWindow("video");
 
   Timer timer;
-  Average readTime(fps), renderTime(fps), presentTime(fps);
+  Average readTime(fps), 
+          processTime(fps),
+          renderTime(fps), 
+          presentTime(fps);
   FpsMeter fpsMeter(fps);
 
   double frameTime = nanoTime();
@@ -75,12 +150,16 @@ int main(int argc, char** argv) {
   bool done = false;
   while (!done) {
     timer.mark();
-    
+
     if (!rdr.nextFrame(frame_data)) {
       break;
     }
 
     readTime.sample(timer.mark());
+
+    processor.process(mono_frames, debug_mat);
+
+    processTime.sample(timer.mark());
 
 
     // Render
@@ -88,17 +167,18 @@ int main(int argc, char** argv) {
     snprintf(
         buf, 
         sizeof(buf),
-        "read_time = %.3f, render_time = %.3f, wait_time = %.3f fps = %.2f", 
+        "read_time = %.3f, render_time = %.3f, wait_time = %.3f process_time = %.3f fps = %.2f", 
         readTime.value(), 
         renderTime.value(),
-        presentTime.value(), 
+        presentTime.value(),
+        processTime.value(),
         fpsMeter.currentFps());
 
-    cv::cvtColor(frame_mat, render_mat, CV_GRAY2RGB);
+    cv::cvtColor(debug_mat, render_mat, CV_GRAY2RGB);
     cv::putText(
         render_mat, 
         buf, 
-        cv::Point(0, frame_height), 
+        cv::Point(0, frame_height-10), 
         cv::FONT_HERSHEY_PLAIN, 
         1.0, 
         cv::Scalar(0, 255, 0));
