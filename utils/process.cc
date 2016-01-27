@@ -1,5 +1,8 @@
 #include <boost/program_options.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/nonfree/features2d.hpp>
+
+#include <assert.h>
 
 #include "raw_video_reader.h"
 #include "average.hpp"
@@ -33,6 +36,10 @@ struct CalibData {
 
 struct UndistortMaps {
   cv::Mat x, y;
+};
+
+struct Match {
+  int leftIndex, rightIndex;
 };
 
 class FrameProcessor {
@@ -77,12 +84,94 @@ class FrameProcessor {
             maps_[i].x, 
             maps_[i].y, 
             cv::INTER_LINEAR);
-      }
+
+        cv::SURF surf;
+        surf(undistorted_image_[i], cv::Mat(), keypoints_[i], descriptors_[i]);
+
+        order_[i].resize(keypoints_[i].size());
+        for (int j=0; j < order_[i].size(); ++j) {
+          order_[i][j] = j;
+        }
+        
+        sort(order_[i].begin(), order_[i].end(), [this, i](int a, int b) -> bool {
+            auto& k1 = keypoints_[i][a].pt;
+            auto& k2 = keypoints_[i][b].pt;
+
+            return (k1.y < k2.y || (k1.y == k2.y && k1.x < k2.x));
+        });
+     }
 
       hconcat(undistorted_image_[0], undistorted_image_[1], debug);
 
-      cv::Surf surf;
-      
+      for (int i=0; i < 2; ++i) {
+        int j = 1 - i;
+        match(
+            keypoints_[i], order_[i], descriptors_[i],
+            keypoints_[j], order_[j], descriptors_[j],
+            matches_[i]);
+      }
+
+      int nmatches = 0;
+      for (int i=0; i < matches_[0].size(); ++i) {
+        int j = matches_[0][i];
+        if (j != -1 && matches_[1][j] == i) {
+          nmatches++;
+        }
+      }
+
+      cout << "Matches = " << nmatches << endl;
+    }
+
+    void match(const vector<cv::KeyPoint>& kps1,
+               const vector<int>& idx1,
+               const cv::Mat& desc1,
+               const vector<cv::KeyPoint>& kps2,
+               const vector<int>& idx2,
+               const cv::Mat& desc2,
+               vector<int>& matches) {
+      matches.resize(kps1.size());
+
+      int j0 = 0, j1 = 0;
+
+      for (int i : idx1) {
+        auto& pt1 = kps1[i].pt;
+
+        matches[i] = -1;
+
+        while (j0 < kps2.size() && kps2[idx2[j0]].pt.y < pt1.y - 2)
+          ++j0;
+
+        while (j1 < kps2.size() && kps2[idx2[j1]].pt.y < pt1.y + 2)
+          ++j1;
+
+//        cout << kps2.size() << " " << j0 << " " << j1 << " " << pt1 << " " << kps2[idx2[j0]].pt << " " << kps2[idx2[j1]].pt << endl;
+
+        assert(j1 >= j0);
+
+        double best_d = 1E+15, second_d = 1E+15;
+        double best_j = -1;
+
+        for (int jj = j0; jj < j1; jj++) {
+          int j = idx2[jj];
+          auto& pt2 = kps2[j].pt;
+
+          assert(abs(pt1.y - pt2.y) < 2);
+
+          if (abs(pt1.x - pt2.x) < 100) {
+            double dist = cv::norm(desc1.row(i) - desc2.row(j));
+            if (dist < best_d) {
+              best_d = dist;
+              best_j = j;
+            } else if (dist < second_d) {
+              second_d = dist;
+            }
+          }
+        }
+        
+        if (best_d / second_d < 0.8) {
+          matches[i] = best_j;
+        }
+      }
     }
 
   private:
@@ -92,8 +181,10 @@ class FrameProcessor {
 
     cv::Mat undistorted_image_[2];
 
-    vector<cv::KeyPoint> keypoints_;
-    cv::Mat descriptors_;
+    vector<cv::KeyPoint> keypoints_[2];
+    cv::Mat descriptors_[2];
+    vector<int> order_[2];
+    vector<int> matches_[2]; 
 };
 
 
