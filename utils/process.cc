@@ -61,18 +61,19 @@ class FrameProcessor {
           cv::CALIB_ZERO_DISPARITY,
           0); 
 
-      cout << "Ml = " << calib.Ml << endl << "d = " << calib.dl << endl;
+      cout << "Ml = " << calib.Ml << endl << "dl = " << calib.dl << endl;
+      cout << "Mr = " << calib.Mr << endl << "dr = " << calib.dr << endl;
 
       cv::initUndistortRectifyMap(
           calib.Ml, calib.dl, Rl_, Pl_, 
           cv::Size(width, height),
-          CV_16SC2,
-          maps_[LEFT].x, maps_[LEFT].y );
+          CV_32FC1,
+          maps_[LEFT].x, maps_[LEFT].y);
 
       cv::initUndistortRectifyMap(
           calib.Mr, calib.dr, Rr_, Pr_, 
           cv::Size(width, height),
-          CV_16SC2,
+          CV_32FC1,
           maps_[RIGHT].x, maps_[RIGHT].y);
     }
 
@@ -86,7 +87,7 @@ class FrameProcessor {
             cv::INTER_LINEAR);
 
         cv::SURF surf;
-        surf(undistorted_image_[i], cv::Mat(), keypoints_[i], descriptors_[i]);
+        surf(undistorted_image_[i], cv::noArray(), keypoints_[i], descriptors_[i]);
 
         order_[i].resize(keypoints_[i].size());
         for (int j=0; j < order_[i].size(); ++j) {
@@ -99,9 +100,7 @@ class FrameProcessor {
 
             return (k1.y < k2.y || (k1.y == k2.y && k1.x < k2.x));
         });
-     }
-
-      hconcat(undistorted_image_[0], undistorted_image_[1], debug);
+      }
 
       for (int i=0; i < 2; ++i) {
         int j = 1 - i;
@@ -111,15 +110,20 @@ class FrameProcessor {
             matches_[i]);
       }
 
-      int nmatches = 0;
+      points_.resize(0);
       for (int i=0; i < matches_[0].size(); ++i) {
         int j = matches_[0][i];
         if (j != -1 && matches_[1][j] == i) {
-          nmatches++;
+          auto& kp1 = keypoints_[0][i].pt;
+          auto& kp2 = keypoints_[1][j].pt;
+          points_.push_back(cv::Point3d(kp1.x, (kp1.y + kp2.y)/2, kp1.x - kp2.x));
         }
       }
 
-      cout << "Matches = " << nmatches << endl;
+      cout << "Matches = " << points_ << endl;
+      cv::perspectiveTransform(points_, points_, Q_);
+
+      drawDebugImage(debug);
     }
 
     void match(const vector<cv::KeyPoint>& kps1,
@@ -168,9 +172,77 @@ class FrameProcessor {
           }
         }
         
-        if (best_d / second_d < 0.8) {
+        if (best_j > -1 && best_d / second_d < 0.8) {
           matches[i] = best_j;
         }
+      }
+    }
+
+    void drawDebugImage(cv::Mat& debug) {
+      int w = undistorted_image_[0].cols;
+      int h = undistorted_image_[0].rows;
+    
+      debug.create(h, 2*w, CV_8UC3);
+
+      cv::cvtColor(
+          undistorted_image_[0], 
+          debug(cv::Range::all(), cv::Range(0, w)), 
+          CV_GRAY2RGB);
+      cv::cvtColor(
+          undistorted_image_[1], 
+          debug(cv::Range::all(), cv::Range(w, 2*w)), 
+          CV_GRAY2RGB);
+
+      for (int t = 0; t < 2; ++t) {
+        for (int i = 0; i < keypoints_[t].size(); ++i) {
+          auto& pt = keypoints_[t][i].pt;
+
+          int c = matches_[t][i];
+          bool mutual = c != -1 && matches_[1-t][c] == i;
+          if (mutual) {
+            cv::circle(debug, cv::Point(pt.x + w*t, pt.y), 3, cv::Scalar(0, 255, 0));
+          } else {
+            cv::circle(debug, cv::Point(pt.x + w*t, pt.y), 3, cv::Scalar(0, 0, 255));
+          }
+
+          if (c != -1) {
+            auto& pt2 = keypoints_[1-t][c].pt;
+            if (!mutual || t == 0) {
+              cv::line(
+                  debug, 
+                  cv::Point(pt.x + w*t, pt.y), 
+                  cv::Point(pt2.x + w*(1-t), pt2.y),
+                  cv::Scalar(0, mutual*255, (!mutual)*255));
+            }
+          }
+        }
+      }
+    }
+
+    void printKeypointInfo(int x, int y) const {
+      cout << "debug x = " << x << " y = " << y << endl;
+
+      int w = undistorted_image_[0].cols;
+      int t = x >= w ? 1 : 0;
+      x %= w;
+    
+      int best = -1;
+      double bestD = 1E+15;
+
+
+      for (int i = 0; i < keypoints_[t].size(); ++i) {
+        auto& pt = keypoints_[t][i].pt;
+        double d = sqrt((pt.x - x)*(pt.x - x) + (pt.y - y)*(pt.y - y));
+
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+
+      if (best != -1) {
+        auto& pt = keypoints_[t][best].pt;
+        cout << "i = " << best << " x = " << pt.x << " y = " << pt.y << endl;
       }
     }
 
@@ -185,7 +257,16 @@ class FrameProcessor {
     cv::Mat descriptors_[2];
     vector<int> order_[2];
     vector<int> matches_[2]; 
+    vector<cv::Point3d> points_;
 };
+
+void onMouse(int event, int x, int y, int flags, void* ptr) {
+  const FrameProcessor* p = static_cast<FrameProcessor*>(ptr);
+
+  if (event == cv::EVENT_LBUTTONDOWN) {
+    p->printKeypointInfo(x, y);
+  }
+}
 
 
 int main(int argc, char** argv) {
@@ -223,10 +304,10 @@ int main(int argc, char** argv) {
     frame_mat(cv::Range::all(), cv::Range(0, frame_width)),
     frame_mat(cv::Range::all(), cv::Range(frame_width, frame_width*2))
   };
-  cv::Mat debug_mat;
-  cv::Mat render_mat(frame_height, frame_width*2, CV_8UC2);
+  cv::Mat debug_mat(frame_height, frame_width*2, CV_8UC2);
 
   cv::namedWindow("video");
+  cv::setMouseCallback("video", onMouse, &processor);
 
   Timer timer;
   Average readTime(fps), 
@@ -265,16 +346,15 @@ int main(int argc, char** argv) {
         processTime.value(),
         fpsMeter.currentFps());
 
-    cv::cvtColor(debug_mat, render_mat, CV_GRAY2RGB);
     cv::putText(
-        render_mat, 
+        debug_mat, 
         buf, 
         cv::Point(0, frame_height-10), 
         cv::FONT_HERSHEY_PLAIN, 
         1.0, 
         cv::Scalar(0, 255, 0));
 
-    cv::imshow("video", render_mat);
+    cv::imshow("video", debug_mat);
 
     renderTime.sample(timer.mark());
     fpsMeter.mark();
@@ -283,7 +363,7 @@ int main(int argc, char** argv) {
     frameTime += frameDt;
     long wait = max(1, static_cast<int>((frameTime - nanoTime())*1000));
 
-    int key = cv::waitKey(wait);
+    int key = cv::waitKey(0);
     if (key != -1) {
       key &= 0xFF;
     }
