@@ -91,9 +91,9 @@ res, Ml, dl, Mr, dr, R, T, E, F = cv2.stereoCalibrate(
     trueCorners(len(matching_left_corners)),
     matching_left_corners,
     matching_right_corners,
-    #Ml, dl, Mr, dr,
-    numpy.eye(3, 3), numpy.zeros(8), numpy.eye(3, 3), numpy.zeros(8),
     (640, 480),
+    #Ml, dl, Mr, dr,
+    #numpy.eye(3, 3), numpy.zeros(8), numpy.eye(3, 3), numpy.zeros(8),
     flags=calib_flags,
     criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1E-5))
 
