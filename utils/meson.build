@@ -8,6 +8,7 @@ executable('capture',
   sources : [
     'capture.cc', 
     'camera.cc', 
+    'utils.cc',
     'frame_buffer_queue.cc'],
   dependencies: [opencv, boost_options, uvc])
 

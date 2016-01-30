@@ -147,7 +147,7 @@ int main(int argc, char **argv) {
   int current_snapshot_index = 0;
   bool done = false;
   int frame_count = 0;
-  double last_timestamp = nano_time();
+  double last_timestamp = nanoTime();
   double t0 = last_timestamp;
   int fps_frame_count = 0;
   while(!done) {
@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
     }
 
     fps_frame_count++;
-    double t = nano_time();
+    double t = nanoTime();
     if (t - last_timestamp >= 2) {
       cout << setprecision(3) << "t = " << t - t0
         << " FPS = " << (fps_frame_count / (t - last_timestamp)) 

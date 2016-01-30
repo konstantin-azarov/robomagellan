@@ -2,8 +2,8 @@ import cv2
 import numpy
 import os
 
-CHESSBOARD_WIDTH = 6
-CHESSBOARD_HEIGHT = 9
+CHESSBOARD_WIDTH = 7
+CHESSBOARD_HEIGHT = 5
 CHESSBOARD_STEP = 24.5 # mm
 
 N_IMAGES = 12
@@ -18,7 +18,10 @@ def trueCorners(cnt):
 def extractCornersFromImage(filename):
     img = cv2.cvtColor(cv2.imread(filename), cv2.COLOR_BGR2GRAY)
 
-    res, corners = cv2.findChessboardCorners(img, (6, 9), flags=cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE)
+    res, corners = cv2.findChessboardCorners(
+            img, 
+            (CHESSBOARD_WIDTH, CHESSBOARD_HEIGHT), 
+            flags=cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE)
     if not res:
         return None, None
 
@@ -34,7 +37,7 @@ all_right_corners = []
 matching_left_corners = []
 matching_right_corners = []
 
-snapshots_dir = "utils/snapshots/calibration"
+snapshots_dir = "snapshots/calibration"
 
 i = 1
 while os.path.isfile(os.path.join(snapshots_dir, "left_%d.png" % i)):
@@ -131,5 +134,5 @@ def savePyData(f):
     print >>f, "R = ", repr(R)
     print >>f, "T = ", repr(T)
 
-with open("utils/data/calibration_constants.py", "w") as f:
+with open("data/calibration_constants.py", "w") as f:
     savePyData(f)
