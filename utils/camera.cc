@@ -109,7 +109,7 @@ bool Camera::init(int width, int height, int fps) {
     return false;
   }
 
-  //uvc_set_ae_mode(devh_, 1); /* e.g., turn on auto exposure */
+  uvc_set_ae_mode(devh_, 0); /* e.g., turn on auto exposure */
 
   /* Start the video stream. The library will call user function cb:
    *   cb(frame, (void*) 12345)
@@ -121,6 +121,30 @@ bool Camera::init(int width, int height, int fps) {
   }
 
   return true;
+}
+
+uint32_t Camera::getExposure() {
+  uint32_t res;
+
+  if (uvc_get_exposure_abs(devh_, &res, UVC_GET_CUR) < 0) {
+    return -1;
+  }
+
+  return res;
+}
+
+void Camera::getExposureLimits(uint32_t& minE, uint32_t& maxE) {
+  if (uvc_get_exposure_abs(devh_, &minE, UVC_GET_MIN) < 0) {
+    minE = -1;
+  }
+  
+  if (uvc_get_exposure_abs(devh_, &maxE, UVC_GET_MAX) < 0) {
+    maxE = -1;
+  }
+}
+
+void Camera::setExposure(uint32_t value) {
+  uvc_set_exposure_abs(devh_, value);
 }
 
 void Camera::shutdown() {

@@ -121,7 +121,9 @@ class FrameProcessor {
       }
 
       cout << "Matches = " << points_ << endl;
-      cv::perspectiveTransform(points_, points_, Q_);
+      if (points_.size() > 0) {
+        cv::perspectiveTransform(points_, points_, Q_);
+      }
 
       drawDebugImage(debug);
     }

@@ -18,6 +18,10 @@ class Camera {
     // at least width*height*2
     void nextFrame(uint8_t* data);
 
+    uint32_t getExposure();
+    void getExposureLimits(uint32_t& minE, uint32_t& maxE);
+    void setExposure(uint32_t value);
+
   private:
     static void staticCallback(uvc_frame_t* frame, void* ptr);
     void callback(uvc_frame_t* frame);

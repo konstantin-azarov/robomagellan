@@ -135,6 +135,16 @@ int main(int argc, char **argv) {
   }
 #endif
   
+  uint32_t minExposure, maxExposure;
+  camera.getExposureLimits(minExposure, maxExposure);
+
+  uint32_t curExposure = camera.getExposure();
+  
+
+  cout << "Exposure: min = " << minExposure 
+       << ", max = " << maxExposure 
+       << ", cur = " << curExposure 
+       << endl;
   cout << "Ready" << endl;
 
   uint8_t buffer[FRAME_SIZE*2];
@@ -202,6 +212,21 @@ int main(int argc, char **argv) {
           close_video_sink(video_format, video_sink);
           video_sink = nullptr;
         }
+        break;
+      case '=':
+      case '+':
+        curExposure = min(maxExposure, curExposure + (key == '=' ? 50 : 1));
+        cout << "Exposure: cur = " << curExposure << endl;
+        camera.setExposure(curExposure);
+        break;
+      case '-':
+      case '_':
+        curExposure = max(minExposure, curExposure - (key == '-' ? 50 : 1));
+        cout << "Exposure: cur = " << curExposure << endl;
+        camera.setExposure(curExposure);
+        break;
+      case 226:
+        break; // shift
       case -1:
         break;
       default:
