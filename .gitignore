@@ -1,4 +1,6 @@
 utils/build
+utils/video
 
 *.pyc
 .*.swp
+.*.swo
