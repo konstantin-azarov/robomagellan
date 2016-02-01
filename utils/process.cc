@@ -150,7 +150,7 @@ class FrameProcessor {
         while (j1 < kps2.size() && kps2[idx2[j1]].pt.y < pt1.y + 2)
           ++j1;
 
-//        cout << kps2.size() << " " << j0 << " " << j1 << " " << pt1 << " " << kps2[idx2[j0]].pt << " " << kps2[idx2[j1]].pt << endl;
+       // cout << kps2.size() << " " << j0 << " " << j1 << " " << pt1 << " " << kps2[idx2[j0]].pt << " " << kps2[idx2[j1]].pt << endl;
 
         assert(j1 >= j0);
 
@@ -161,7 +161,7 @@ class FrameProcessor {
           int j = idx2[jj];
           auto& pt2 = kps2[j].pt;
 
-          assert(abs(pt1.y - pt2.y) < 2);
+          assert(abs(pt1.y - pt2.y) <= 2);
 
           if (abs(pt1.x - pt2.x) < 100) {
             double dist = cv::norm(desc1.row(i) - desc2.row(j));
