@@ -4,9 +4,7 @@ import os
 
 CHESSBOARD_WIDTH = 7
 CHESSBOARD_HEIGHT = 5
-CHESSBOARD_STEP = 24.5 # mm
-
-N_IMAGES = 12
+CHESSBOARD_STEP = 44.5 # mm
 
 def trueCorners(cnt):
     res = []
@@ -85,7 +83,7 @@ calib_flags = (cv2.CALIB_RATIONAL_MODEL +
 # print "Right RMS = ", res
 
 calib_flags = (cv2.CALIB_RATIONAL_MODEL +
-              cv2.CALIB_ZERO_TANGENT_DIST +
+            #  cv2.CALIB_ZERO_TANGENT_DIST +
             #   cv2.CALIB_FIX_ASPECT_RATIO +
             #   cv2.CALIB_SAME_FOCAL_LENGTH +
               cv2.CALIB_FIX_K3 + cv2.CALIB_FIX_K4 + cv2.CALIB_FIX_K5)
@@ -123,7 +121,6 @@ for i in xrange(len(matching_left_corners)):
     cnt += len(left_epilines)
 print "Reprojection error = ", err/cnt
 
-
 def savePyData(f):
     numpy.set_printoptions(precision=16)
     print >>f, "from numpy import array"
@@ -136,3 +133,48 @@ def savePyData(f):
 
 with open("data/calibration_constants.py", "w") as f:
     savePyData(f)
+
+def printMatrix(f, name, matrix):
+    print >>f, "%s: !!opencv-matrix" % name 
+    print >>f, "   rows: %d" % matrix.shape[0]
+    print >>f, "   cols: %d" % matrix.shape[1]
+    print >>f, "   dt: d"
+    print >>f, "   data:", repr(matrix.flatten().tolist())
+
+with open("data/calib.yml", "w") as f:
+    print >>f, "%YAML:1.0"
+
+    printMatrix(f, "Ml", Ml)
+    printMatrix(f, "dl", dl)
+    printMatrix(f, "Mr", Mr)
+    printMatrix(f, "dr", dr)
+    printMatrix(f, "R", R)
+    printMatrix(f, "T", T)
+
+# Draw frames
+Rl, Rr, Pl, Pr, Q, poi1, poi2 = cv2.stereoRectify(
+    Ml, dl,
+    Mr, dr,
+    (640, 480), R, T,
+    None, None, None, None, None,
+    cv2.CALIB_ZERO_DISPARITY, 0, (640, 480))
+
+mlx, mly = cv2.initUndistortRectifyMap(Ml, dl, Rl, Pl, (640, 480), cv2.CV_16SC2)
+mrx, mry = cv2.initUndistortRectifyMap(Mr, dr, Rr, Pr, (640, 480), cv2.CV_16SC2)
+i = 1
+while os.path.isfile(os.path.join(snapshots_dir, "left_%d.png" % i)):
+    left = cv2.imread(os.path.join(snapshots_dir, "left_%d.png" % i))
+    right = cv2.imread(os.path.join(snapshots_dir, "right_%d.png" % i))
+
+    left1 = cv2.remap(left, mlx, mly, cv2.INTER_LINEAR)
+    right1 = cv2.remap(right, mrx, mry, cv2.INTER_LINEAR)
+
+    img = numpy.concatenate((left1, right1), 1)
+    cv2.imshow("main", img)
+
+    if (cv2.waitKey(0) == 27):
+        break
+
+    i += 1
+
+
