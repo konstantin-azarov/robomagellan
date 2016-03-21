@@ -9,6 +9,7 @@ class RawVideoReader {
     RawVideoReader(const std::string& filename, int w, int h);
     ~RawVideoReader();
 
+    void skip(int frames);
     bool nextFrame(uint8_t* data);
 
   private:

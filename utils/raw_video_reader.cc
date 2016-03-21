@@ -17,3 +17,7 @@ bool RawVideoReader::nextFrame(uint8_t* data) {
     return false;
   }
 }
+
+void RawVideoReader::skip(int frames) {
+  f_.seekg(frames*w_*h_, ios_base::cur);
+}

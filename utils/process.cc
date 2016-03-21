@@ -34,232 +34,151 @@ struct CalibData {
   }
 };
 
-struct UndistortMaps {
-  cv::Mat x, y;
-};
+#include "frame_processor.inl"
 
-struct Match {
-  int leftIndex, rightIndex;
-};
+const double CROSS_POINT_DIST_THRESHOLD = 20; // mm
 
-class FrameProcessor {
-  private:
-    const int LEFT = 0;
-    const int RIGHT = 1;
-
+class CrossFrameProcessor {
   public:
-    FrameProcessor(const CalibData& calib, int width, int height) {
-
-      cv::stereoRectify(
-          calib.Ml, calib.dl, 
-          calib.Mr, calib.dr, 
-          cv::Size(width, height),
-          calib.R, calib.T,
-          Rl_, Rr_,
-          Pl_, Pr_,
-          Q_,
-          cv::CALIB_ZERO_DISPARITY,
-          0); 
-
-      cout << "Ml = " << calib.Ml << endl << "dl = " << calib.dl << endl;
-      cout << "Mr = " << calib.Mr << endl << "dr = " << calib.dr << endl;
-
-      cv::initUndistortRectifyMap(
-          calib.Ml, calib.dl, Rl_, Pl_, 
-          cv::Size(width, height),
-          CV_32FC1,
-          maps_[LEFT].x, maps_[LEFT].y);
-
-      cv::initUndistortRectifyMap(
-          calib.Mr, calib.dr, Rr_, Pr_, 
-          cv::Size(width, height),
-          CV_32FC1,
-          maps_[RIGHT].x, maps_[RIGHT].y);
+    CrossFrameProcessor() {
     }
 
-    void process(const cv::Mat src[], cv::Mat& debug) {
-      for (int i=0; i < 2; ++i) {
-        cv::remap(
-            src[i], 
-            undistorted_image_[i], 
-            maps_[i].x, 
-            maps_[i].y, 
-            cv::INTER_LINEAR);
+    void process(const FrameProcessor& p1, const FrameProcessor& p2) {
+      cout << "Matching" << endl;
+      const vector<cv::Point3d>& points1 = p1.points();
+      const vector<cv::Point3d>& points2 = p2.points();
 
-        cv::SURF surf;
-        surf(undistorted_image_[i], cv::noArray(), keypoints_[i], descriptors_[i]);
+      match(p1, p2, matches_[0]);
+      match(p2, p1, matches_[1]);
 
-        order_[i].resize(keypoints_[i].size());
-        for (int j=0; j < order_[i].size(); ++j) {
-          order_[i][j] = j;
-        }
-        
-        sort(order_[i].begin(), order_[i].end(), [this, i](int a, int b) -> bool {
-            auto& k1 = keypoints_[i][a].pt;
-            auto& k2 = keypoints_[i][b].pt;
+      full_matches_.resize(0);
 
-            return (k1.y < k2.y || (k1.y == k2.y && k1.x < k2.x));
-        });
-      }
-
-      for (int i=0; i < 2; ++i) {
-        int j = 1 - i;
-        match(
-            keypoints_[i], order_[i], descriptors_[i],
-            keypoints_[j], order_[j], descriptors_[j],
-            matches_[i]);
-      }
-
-      points_.resize(0);
       for (int i=0; i < matches_[0].size(); ++i) {
         int j = matches_[0][i];
         if (j != -1 && matches_[1][j] == i) {
-          auto& kp1 = keypoints_[0][i].pt;
-          auto& kp2 = keypoints_[1][j].pt;
-          points_.push_back(cv::Point3d(kp1.x, (kp1.y + kp2.y)/2, kp1.x - kp2.x));
+          full_matches_.push_back(std::make_pair(points1[i], points2[j]));
         }
       }
 
-      cout << "Matches = " << points_ << endl;
-      if (points_.size() > 0) {
-        cv::perspectiveTransform(points_, points_, Q_);
-      }
+      cout << "Cross matches: " << full_matches_.size() << endl;
 
-      drawDebugImage(debug);
+
+      buildMatchesGraph_();
+      buildClique_();
     }
 
-    void match(const vector<cv::KeyPoint>& kps1,
-               const vector<int>& idx1,
-               const cv::Mat& desc1,
-               const vector<cv::KeyPoint>& kps2,
-               const vector<int>& idx2,
-               const cv::Mat& desc2,
-               vector<int>& matches) {
-      matches.resize(kps1.size());
+  private:
+    void match(
+        const FrameProcessor& p1, 
+        const FrameProcessor& p2,
+        vector<int>& matches) {
+      const vector<cv::Point3d>& points1 = p1.points();
+      const vector<cv::Point3d>& points2 = p2.points();
 
-      int j0 = 0, j1 = 0;
+      matches.resize(points1.size());
 
-      for (int i : idx1) {
-        auto& pt1 = kps1[i].pt;
+      for (int i = 0; i < points1.size(); ++i) {
+        int best_j = -1;
+        double best_dist = 1E+15;
+        auto left_descs = p1.pointDescriptors(i);
+        for (int j = 0; j < points2.size(); ++j) {
+          auto right_descs = p2.pointDescriptors(j);
 
-        matches[i] = -1;
+          double d1 = cv::norm(left_descs.first, right_descs.first);
+          double d2 = cv::norm(left_descs.second, right_descs.second);
 
-        while (j0 < kps2.size() && kps2[idx2[j0]].pt.y < pt1.y - 2)
-          ++j0;
+          double d = max(d1, d2);
 
-        while (j1 < kps2.size() && kps2[idx2[j1]].pt.y < pt1.y + 2)
-          ++j1;
-
-       // cout << kps2.size() << " " << j0 << " " << j1 << " " << pt1 << " " << kps2[idx2[j0]].pt << " " << kps2[idx2[j1]].pt << endl;
-
-        assert(j1 >= j0);
-
-        double best_d = 1E+15, second_d = 1E+15;
-        double best_j = -1;
-
-        for (int jj = j0; jj < j1; jj++) {
-          int j = idx2[jj];
-          auto& pt2 = kps2[j].pt;
-
-          assert(abs(pt1.y - pt2.y) <= 2);
-
-          if (abs(pt1.x - pt2.x) < 100) {
-            double dist = cv::norm(desc1.row(i) - desc2.row(j));
-            if (dist < best_d) {
-              best_d = dist;
-              best_j = j;
-            } else if (dist < second_d) {
-              second_d = dist;
-            }
+          if (d < best_dist) {
+            best_dist = d;
+            best_j = j;
           }
         }
-        
-        if (best_j > -1 && best_d / second_d < 0.8) {
-          matches[i] = best_j;
-        }
+
+        matches[i] = best_j;
       }
     }
 
-    void drawDebugImage(cv::Mat& debug) {
-      int w = undistorted_image_[0].cols;
-      int h = undistorted_image_[0].rows;
-    
-      debug.create(h, 2*w, CV_8UC3);
+    void buildMatchesGraph_() {
+      // Construct the matrix of the matches
+      // matches i and j have an edge is distance between corresponding points in the
+      // first image is equal to the distance between corresponding points in the
+      // last image.
+      int n = full_matches_.size();
+      matrix_.resize(n*n);
+      degrees_.resize(n);
 
-      cv::cvtColor(
-          undistorted_image_[0], 
-          debug(cv::Range::all(), cv::Range(0, w)), 
-          CV_GRAY2RGB);
-      cv::cvtColor(
-          undistorted_image_[1], 
-          debug(cv::Range::all(), cv::Range(w, 2*w)), 
-          CV_GRAY2RGB);
-
-      for (int t = 0; t < 2; ++t) {
-        for (int i = 0; i < keypoints_[t].size(); ++i) {
-          auto& pt = keypoints_[t][i].pt;
-
-          int c = matches_[t][i];
-          bool mutual = c != -1 && matches_[1-t][c] == i;
-          if (mutual) {
-            cv::circle(debug, cv::Point(pt.x + w*t, pt.y), 3, cv::Scalar(0, 255, 0));
+      for (int i = 0; i < n; ++i) {
+        matrix_[i*n] = 1;
+        for (int j = 0; j < i; ++j) {
+          auto& pts1 = full_matches_[i];
+          auto& pts2 = full_matches_[j];
+          double d1 = cv::norm(pts1.first - pts2.first);
+          double d2 = cv::norm(pts1.second - pts2.second);
+          
+          if (abs(d1 - d2) < CROSS_POINT_DIST_THRESHOLD) {
+            matrix_[i*n + j] = matrix_[j*n + i] = 1;
+            degrees_[i]++;
+            degrees_[j]++;
           } else {
-            cv::circle(debug, cv::Point(pt.x + w*t, pt.y), 3, cv::Scalar(0, 0, 255));
-          }
-
-          if (c != -1) {
-            auto& pt2 = keypoints_[1-t][c].pt;
-            if (!mutual || t == 0) {
-              cv::line(
-                  debug, 
-                  cv::Point(pt.x + w*t, pt.y), 
-                  cv::Point(pt2.x + w*(1-t), pt2.y),
-                  cv::Scalar(0, mutual*255, (!mutual)*255));
-            }
+            matrix_[i*n + j] = matrix_[j*n + i] = 0;
           }
         }
       }
     }
 
-    void printKeypointInfo(int x, int y) const {
-      cout << "debug x = " << x << " y = " << y << endl;
+    void buildClique_() {
+      int n = full_matches_.size();
 
-      int w = undistorted_image_[0].cols;
-      int t = x >= w ? 1 : 0;
-      x %= w;
-    
-      int best = -1;
-      double bestD = 1E+15;
+      // Estimate max clique
+      // find vertex with maximum degree
+      clique_.resize(0);
 
-
-      for (int i = 0; i < keypoints_[t].size(); ++i) {
-        auto& pt = keypoints_[t][i].pt;
-        double d = sqrt((pt.x - x)*(pt.x - x) + (pt.y - y)*(pt.y - y));
-
-        if (d < bestD) {
-          bestD = d;
+      int best = 0;
+      for (int i = 1; i < n; ++i) {
+        if (degrees_[i] > degrees_[best]) {
           best = i;
         }
       }
 
-      if (best != -1) {
-        auto& pt = keypoints_[t][best].pt;
-        cout << "i = " << best << " x = " << pt.x << " y = " << pt.y << endl;
+      candidates_[0].resize(0);
+      for (int i=0; i < n; ++i) {
+        if (i != best) {
+          candidates_[0].push_back(i);
+        }
       }
+
+      int t = 0;
+      while (best >= 0) {
+        clique_.push_back(best);
+      
+        candidates_[1-t].resize(0);
+        for (int i=0; i < candidates_[t].size(); ++i) {
+          if (best != candidates_[t][i] && matrix_[best*n + candidates_[t][i]]) {
+            candidates_[1-t].push_back(candidates_[t][i]);
+          }
+        }
+
+        best = -1;
+        for (int i=0; i < candidates_[1-t].size(); ++i) {
+          if (best == -1 || degrees_[candidates_[1-t][i]] > degrees_[best]) {
+           best = candidates_[1-t][i];
+          }
+        }
+
+        t = 1-t;
+      }
+
+      cout << "Clique size: " << clique_.size() << endl;
     }
 
   private:
-    cv::Mat Rl_, Pl_, Rr_, Pr_, Q_;
-
-    UndistortMaps maps_[2];
-
-    cv::Mat undistorted_image_[2];
-
-    vector<cv::KeyPoint> keypoints_[2];
-    cv::Mat descriptors_[2];
-    vector<int> order_[2];
-    vector<int> matches_[2]; 
-    vector<cv::Point3d> points_;
+    vector<int> matches_[2];
+    vector<std::pair<cv::Point3d, cv::Point3d> > full_matches_;
+    vector<int> matrix_;
+    vector<int> degrees_;
+    vector<int> clique_;
+    vector<int> candidates_[2];
 };
 
 void onMouse(int event, int x, int y, int flags, void* ptr) {
@@ -270,10 +189,9 @@ void onMouse(int event, int x, int y, int flags, void* ptr) {
   }
 }
 
-
 int main(int argc, char** argv) {
   string video_file, calib_file;
-  int fps;
+  int fps, start;
 
   po::options_description desc("Command line options");
   desc.add_options()
@@ -287,6 +205,11 @@ int main(int argc, char** argv) {
        "video frame rate");
 
   desc.add_options()
+      ("start",
+       po::value<int>(&start)->default_value(0),
+       "start at this second");
+
+  desc.add_options()
       ("calib-file",
        po::value<string>(&calib_file)->default_value("data/calib.yml"),
        "path to the calibration file");
@@ -297,7 +220,11 @@ int main(int argc, char** argv) {
   
   CalibData calib = CalibData::read(calib_file);
 
-  FrameProcessor processor(calib, frame_width, frame_height);
+  FrameProcessor frame_processors[] = {
+    FrameProcessor(calib, frame_width, frame_height),
+    FrameProcessor(calib, frame_width, frame_height)
+  };
+  CrossFrameProcessor cross_processor;
 
   RawVideoReader rdr(video_file, frame_width*2, frame_height);
   uint8_t frame_data[frame_width*2*frame_height];
@@ -308,8 +235,10 @@ int main(int argc, char** argv) {
   };
   cv::Mat debug_mat(frame_height, frame_width*2, CV_8UC2);
 
+  rdr.skip(fps*start);
+
   cv::namedWindow("video");
-  cv::setMouseCallback("video", onMouse, &processor);
+//  cv::setMouseCallback("video", onMouse, &processor);
 
   Timer timer;
   Average readTime(fps), 
@@ -321,6 +250,8 @@ int main(int argc, char** argv) {
   double frameTime = nanoTime();
   double frameDt = 1.0/fps;
 
+  int frame_index = 0;
+
   bool done = false;
   while (!done) {
     timer.mark();
@@ -331,10 +262,17 @@ int main(int argc, char** argv) {
 
     readTime.sample(timer.mark());
 
+    FrameProcessor& processor = frame_processors[frame_index & 1];
+
     processor.process(mono_frames, debug_mat);
 
     processTime.sample(timer.mark());
 
+    if (frame_index != 0) {
+      cross_processor.process(
+          frame_processors[!(frame_index & 1)],
+          processor);
+    }
 
     // Render
     char buf[1024];
@@ -365,7 +303,7 @@ int main(int argc, char** argv) {
     frameTime += frameDt;
     long wait = max(1, static_cast<int>((frameTime - nanoTime())*1000));
 
-    int key = cv::waitKey(0);
+    int key = cv::waitKey(1);
     if (key != -1) {
       key &= 0xFF;
     }
@@ -376,6 +314,8 @@ int main(int argc, char** argv) {
     }
 
     presentTime.sample(timer.mark());
+
+    frame_index++;
   }
 
   return 0;

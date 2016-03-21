@@ -10,11 +10,20 @@ executable('capture',
     'camera.cc', 
     'utils.cc',
     'frame_buffer_queue.cc'],
-  dependencies: [opencv, boost_options, uvc])
+  dependencies: [ opencv, boost_options, uvc ])
 
 executable('process',
   sources : [
     'process.cc',
     'utils.cc',
-    'raw_video_reader.cc'],
+    'raw_video_reader.cc',
+    'rigid_estimator.cc'],
   dependencies: [ opencv, boost_options ] )
+
+rigid_estimator_test = executable('rigid_estimator_test',
+  sources : [
+    'rigid_estimator.cc',
+    'rigid_estimator_test.cc'
+  ],
+  dependencies: [ opencv ])
+test('rigid_estimator_test', rigid_estimator_test)
