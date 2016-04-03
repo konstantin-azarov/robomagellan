@@ -8,6 +8,7 @@
 #include "average.hpp"
 #include "fps_meter.hpp"
 #include "timer.hpp"
+#include "rigid_estimator.hpp"
 
 using namespace std;
 
@@ -38,12 +39,24 @@ struct CalibData {
 
 const double CROSS_POINT_DIST_THRESHOLD = 20; // mm
 
+struct CrossFrameMatch {
+  CrossFrameMatch() {}
+
+  CrossFrameMatch(const cv::Point3d p1_, const cv::Point3d p2_, int i1_, int i2_) :
+    p1(p1_), p2(p2_), i1(i1_), i2(i2_) {
+  }
+
+  cv::Point3d p1, p2;
+  // Index of the corresponding frame point
+  int i1, i2;
+};
+
 class CrossFrameProcessor {
   public:
     CrossFrameProcessor() {
     }
 
-    void process(const FrameProcessor& p1, const FrameProcessor& p2) {
+    bool process(const FrameProcessor& p1, const FrameProcessor& p2) {
       cout << "Matching" << endl;
       const vector<cv::Point3d>& points1 = p1.points();
       const vector<cv::Point3d>& points2 = p2.points();
@@ -56,16 +69,27 @@ class CrossFrameProcessor {
       for (int i=0; i < matches_[0].size(); ++i) {
         int j = matches_[0][i];
         if (j != -1 && matches_[1][j] == i) {
-          full_matches_.push_back(std::make_pair(points1[i], points2[j]));
+          full_matches_.push_back(CrossFrameMatch(points1[i], points2[j], i, j));
         }
       }
 
-      cout << "Cross matches: " << full_matches_.size() << endl;
-
-
       buildMatchesGraph_();
-      buildClique_();
+      buildClique_(p1, p2);
+
+      if (clique_points_[0].size() < 10) {
+        return false;
+      }
+
+      estimator_.estimate(clique_points_[1], clique_points_[0]);
+
+//      cout << "Reprojection error: " << reprojectionError_() << endl;
+
+      cout << "R = " << rot() << "; t = " << t() << endl;
+      return true;
     }
+
+    const cv::Mat& rot() const { return estimator_.rot(); }
+    const cv::Point3d& t() const { return estimator_.t(); } 
 
   private:
     void match(
@@ -111,10 +135,10 @@ class CrossFrameProcessor {
       for (int i = 0; i < n; ++i) {
         matrix_[i*n] = 1;
         for (int j = 0; j < i; ++j) {
-          auto& pts1 = full_matches_[i];
-          auto& pts2 = full_matches_[j];
-          double d1 = cv::norm(pts1.first - pts2.first);
-          double d2 = cv::norm(pts1.second - pts2.second);
+          auto& m1 = full_matches_[i];
+          auto& m2 = full_matches_[j];
+          double d1 = cv::norm(m1.p1 - m2.p1);
+          double d2 = cv::norm(m1.p2 - m2.p2);
           
           if (abs(d1 - d2) < CROSS_POINT_DIST_THRESHOLD) {
             matrix_[i*n + j] = matrix_[j*n + i] = 1;
@@ -127,7 +151,7 @@ class CrossFrameProcessor {
       }
     }
 
-    void buildClique_() {
+    void buildClique_(const FrameProcessor& p1, const FrameProcessor& p2) {
       int n = full_matches_.size();
 
       // Estimate max clique
@@ -169,16 +193,64 @@ class CrossFrameProcessor {
         t = 1-t;
       }
 
-      cout << "Clique size: " << clique_.size() << endl;
+      clique_points_[0].resize(clique_.size());
+      clique_points_[1].resize(clique_.size());
+      for (int i=0; i < clique_.size(); ++i) {
+        clique_points_[0][i] = full_matches_[clique_[i]].p1;
+        clique_points_[1][i] = full_matches_[clique_[i]].p2;
+      }
+
+//      clique_2d_3d_points_[0].resize(clique_.size());
+//      clique_2d_3d_points_[0].resize(clique_.size());
+//      for (int i=0; i < clique_.size(); ++) {
+//        const auto& match = full_matches_[clique_[i]];
+//        
+//        const auto f1 = p1.features(match.i1);
+//        const auto f2 = p2.features(match.i2);
+//
+//        clique_2d_3d_points_[0][i] = std::make_pair(f1, match.p2);
+//        clique_2d_3d_points_[1][i] = std::make_pair(p2, match.p1);
+//      }
     }
 
+//    double reprojectionError_() {
+//    }
+//
+//    double halfReprojectionError_(
+//        int t, const FrameProcessor& p, const cv::Mat& rot, const cv::Point3d& t) {
+//      for (int i=0; i < clique_.size(); ++) {
+//        const auto& m = full_matches_[clique[i]];
+//        
+//        const auto& point = t == 0 ? m.p1 : m.p2;
+//        const auto& features = p.features(t == 0 ? m.i2 : m.i1);
+//
+//        auto transformed_point = transformPoint(point, rot, t);
+//        auto projected_point = projectPoint(transformed_point, 
+//      }
+//    }
+//
   private:
+    // matches[0][i] - best match in the second frame for i-th feature in the first frame
+    // matches[1][j] - best match in the first frame for j-th feature in the second frame
     vector<int> matches_[2];
-    vector<std::pair<cv::Point3d, cv::Point3d> > full_matches_;
+    // 3d point matches between frames
+    vector<CrossFrameMatch> full_matches_;
+    // Matrix of matches (there is an edge between i-th and j-th match if they are
+    // compatible). Two matches are compatible if distance between points in the first
+    // frame is the same as distance between points in the second frame.
     vector<int> matrix_;
+    // Vertex degrees in the matches graph
     vector<int> degrees_;
+    // Maximal clique - indexes in the full_matches_;
     vector<int> clique_;
     vector<int> candidates_[2];
+    // Actual point pairs from the clique (from the first and second frames respectively)
+    vector<cv::Point3d> clique_points_[2];
+    // Original features (or rather their locations) from the first and second frames
+    // respectively
+    vector<std::pair<cv::Point2d, cv::Point2d>> clique_features_[2];
+    // estimator
+    RigidEstimator estimator_;
 };
 
 void onMouse(int event, int x, int y, int flags, void* ptr) {
@@ -301,7 +373,7 @@ int main(int argc, char** argv) {
 
     // Wait for next frame
     frameTime += frameDt;
-    long wait = max(1, static_cast<int>((frameTime - nanoTime())*1000));
+    //long wait = max(1, static_cast<int>((frameTime - nanoTime())*1000));
 
     int key = cv::waitKey(1);
     if (key != -1) {

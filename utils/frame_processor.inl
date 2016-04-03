@@ -231,6 +231,12 @@ class FrameProcessor {
       return points_;
     }
 
+//    const std::pair<cv::Point2d, cv::Point2d> features(int p) const {
+//      int i = point_keypoints_[p];
+//      int j = matches_[0][i];
+//      return std::make_pair(keypoints_[0][i].pt, keypoints_[1][j].pt);
+//    }
+
     // For 0 <= p < points_.size return left and right descriptor for the
     // corresponding point.
     const std::pair<cv::Mat, cv::Mat> pointDescriptors(int p) const {
@@ -239,6 +245,9 @@ class FrameProcessor {
 
       return std::make_pair(descriptors_[0].row(i), descriptors_[1].row(j));
     }
+
+    const cv::Mat& Pl() const { return Pl_; }
+    const cv::Mat& Pr() const { return Pr_; }
 
   private:
     cv::Mat Rl_, Pl_, Rr_, Pr_, Q_;

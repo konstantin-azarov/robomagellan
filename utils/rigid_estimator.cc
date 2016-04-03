@@ -9,8 +9,14 @@ RigidEstimator::RigidEstimator() {
   rot_.create(3, 3, CV_64F);
 }
 
-void RigidEstimator::estimate(const vector<pair<cv::Point3d, cv::Point3d> >& points) {
-  unpack(points);
+void RigidEstimator::estimate(
+    const std::vector<cv::Point3d>& p1,
+    const std::vector<cv::Point3d>& p2) {
+  pts1_.resize(p1.size());
+  std::copy(p1.begin(), p1.end(), pts1_.begin());
+  pts2_.resize(p2.size());
+  std::copy(p2.begin(), p2.end(), pts2_.begin());
+
   auto c1 = center(pts1_);
   auto c2 = center(pts2_);
 
@@ -27,16 +33,6 @@ void RigidEstimator::estimate(const vector<pair<cv::Point3d, cv::Point3d> >& poi
   t_ = c2 - cv::Point3d(r(0, 0) * c1.x + r(0, 1) * c1.y + r(0, 2) * c1.z,
                         r(1, 0) * c1.x + r(1, 1) * c1.y + r(1, 2) * c1.z,
                         r(2, 0) * c1.x + r(2, 1) * c1.y + r(2, 2) * c1.z);
-}
-
-void RigidEstimator::unpack(const vector<pair<cv::Point3d, cv::Point3d> >& points) {
-  pts1_.resize(points.size());
-  pts2_.resize(points.size());
-
-  for (int i = 0; i < points.size(); ++i) {
-    pts1_[i] = points[i].first;
-    pts2_[i] = points[i].second;
-  }
 }
 
 cv::Point3d RigidEstimator::center(vector<cv::Point3d>& pts) {

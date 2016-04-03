@@ -9,7 +9,8 @@
 
 const double EPS = 1E-10;
 
-std::vector<std::pair<cv::Point3d, cv::Point3d>> regularPoints(cv::Mat R, cv::Point3d t) {
+std::pair<std::vector<cv::Point3d>, 
+          std::vector<cv::Point3d>> regularPoints(cv::Mat R, cv::Point3d t) {
   std::vector<cv::Point3d> src, transformed;
   src.push_back(cv::Point3d(0, 0, 0));
   src.push_back(cv::Point3d(0, 0, 1));
@@ -25,13 +26,7 @@ std::vector<std::pair<cv::Point3d, cv::Point3d>> regularPoints(cv::Mat R, cv::Po
     ));
   }
 
-  std::vector<std::pair<cv::Point3d, cv::Point3d>> res;
-
-  for (int i = 0; i < src.size(); ++i) {
-    res.push_back(std::make_pair(src[i], transformed[i]));
-  }
-
-  return res;
+  return std::make_pair(src, transformed);
 }
 
 cv::Mat rotX(double angle) {
@@ -106,10 +101,15 @@ bool comparePoints(const cv::Point3d& l, const cv::Point3d& r) {
 
 void testRegularPoints(cv::Mat r, cv::Point3d t) {
   RigidEstimator estimator;
+  
+  auto pts = regularPoints(r, t);
+  
+  estimator.estimate(pts.first, pts.second);
 
-  estimator.estimate(regularPoints(r, t));
-
-  REQUIRE(compareMats(estimator.rot(), r));
+  if (!compareMats(estimator.rot(), r)) {
+    std::cerr << "Expected: " << r << "got: " << estimator.rot() << std::endl;
+    REQUIRE(false);
+  }
   REQUIRE(comparePoints(estimator.t(), t));
 }
 
