@@ -4,11 +4,12 @@
 
 #include <assert.h>
 
-#include "raw_video_reader.h"
 #include "average.hpp"
+#include "clique.hpp"
 #include "fps_meter.hpp"
-#include "timer.hpp"
+#include "raw_video_reader.h"
 #include "rigid_estimator.hpp"
+#include "timer.hpp"
 
 using namespace std;
 
@@ -73,7 +74,6 @@ class CrossFrameProcessor {
         }
       }
 
-      buildMatchesGraph_();
       buildClique_(p1, p2);
 
       if (clique_points_[0].size() < 10) {
@@ -123,17 +123,17 @@ class CrossFrameProcessor {
       }
     }
 
-    void buildMatchesGraph_() {
+    void buildClique_(
+        const FrameProcessor& p1, 
+        const FrameProcessor& p2) {
       // Construct the matrix of the matches
       // matches i and j have an edge is distance between corresponding points in the
       // first image is equal to the distance between corresponding points in the
       // last image.
       int n = full_matches_.size();
-      matrix_.resize(n*n);
-      degrees_.resize(n);
+      clique_.reset(n);
 
       for (int i = 0; i < n; ++i) {
-        matrix_[i*n] = 1;
         for (int j = 0; j < i; ++j) {
           auto& m1 = full_matches_[i];
           auto& m2 = full_matches_[j];
@@ -141,63 +141,18 @@ class CrossFrameProcessor {
           double d2 = cv::norm(m1.p2 - m2.p2);
           
           if (abs(d1 - d2) < CROSS_POINT_DIST_THRESHOLD) {
-            matrix_[i*n + j] = matrix_[j*n + i] = 1;
-            degrees_[i]++;
-            degrees_[j]++;
-          } else {
-            matrix_[i*n + j] = matrix_[j*n + i] = 0;
+            clique_.addEdge(i, j);
           }
         }
       }
-    }
 
-    void buildClique_(const FrameProcessor& p1, const FrameProcessor& p2) {
-      int n = full_matches_.size();
+      const std::vector<int>& clique = clique_.clique();
 
-      // Estimate max clique
-      // find vertex with maximum degree
-      clique_.resize(0);
-
-      int best = 0;
-      for (int i = 1; i < n; ++i) {
-        if (degrees_[i] > degrees_[best]) {
-          best = i;
-        }
-      }
-
-      candidates_[0].resize(0);
-      for (int i=0; i < n; ++i) {
-        if (i != best) {
-          candidates_[0].push_back(i);
-        }
-      }
-
-      int t = 0;
-      while (best >= 0) {
-        clique_.push_back(best);
-      
-        candidates_[1-t].resize(0);
-        for (int i=0; i < candidates_[t].size(); ++i) {
-          if (best != candidates_[t][i] && matrix_[best*n + candidates_[t][i]]) {
-            candidates_[1-t].push_back(candidates_[t][i]);
-          }
-        }
-
-        best = -1;
-        for (int i=0; i < candidates_[1-t].size(); ++i) {
-          if (best == -1 || degrees_[candidates_[1-t][i]] > degrees_[best]) {
-           best = candidates_[1-t][i];
-          }
-        }
-
-        t = 1-t;
-      }
-
-      clique_points_[0].resize(clique_.size());
-      clique_points_[1].resize(clique_.size());
-      for (int i=0; i < clique_.size(); ++i) {
-        clique_points_[0][i] = full_matches_[clique_[i]].p1;
-        clique_points_[1][i] = full_matches_[clique_[i]].p2;
+      clique_points_[0].resize(clique.size());
+      clique_points_[1].resize(clique.size());
+      for (int i=0; i < clique.size(); ++i) {
+        clique_points_[0][i] = full_matches_[clique[i]].p1;
+        clique_points_[1][i] = full_matches_[clique[i]].p2;
       }
 
 //      clique_2d_3d_points_[0].resize(clique_.size());
@@ -235,16 +190,9 @@ class CrossFrameProcessor {
     vector<int> matches_[2];
     // 3d point matches between frames
     vector<CrossFrameMatch> full_matches_;
-    // Matrix of matches (there is an edge between i-th and j-th match if they are
-    // compatible). Two matches are compatible if distance between points in the first
-    // frame is the same as distance between points in the second frame.
-    vector<int> matrix_;
-    // Vertex degrees in the matches graph
-    vector<int> degrees_;
-    // Maximal clique - indexes in the full_matches_;
-    vector<int> clique_;
-    vector<int> candidates_[2];
-    // Actual point pairs from the clique (from the first and second frames respectively)
+    // Clique builder
+    Clique clique_;
+    // Points corresponding to clique from the first and second frames
     vector<cv::Point3d> clique_points_[2];
     // Original features (or rather their locations) from the first and second frames
     // respectively

@@ -17,7 +17,8 @@ executable('process',
     'process.cc',
     'utils.cc',
     'raw_video_reader.cc',
-    'rigid_estimator.cc'],
+    'rigid_estimator.cc',
+    'clique.cc'],
   dependencies: [ opencv, boost_options ] )
 
 rigid_estimator_test = executable('rigid_estimator_test',
@@ -26,4 +27,12 @@ rigid_estimator_test = executable('rigid_estimator_test',
     'rigid_estimator_test.cc'
   ],
   dependencies: [ opencv ])
+
+clique_test = executable('clique_test',
+  sources : [
+    'clique.cc',
+    'clique_test.cc'
+  ])
+
 test('rigid_estimator_test', rigid_estimator_test)
+test('clique_test', clique_test)
