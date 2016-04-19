@@ -90,7 +90,6 @@ class FrameProcessor {
       if (points_.size() > 0) {
         cv::perspectiveTransform(points_, points_, Q_);
       }
-      cout << "N_points = " << points_.size() << endl;
 
       drawDebugImage(debug);
     }
@@ -231,11 +230,11 @@ class FrameProcessor {
       return points_;
     }
 
-//    const std::pair<cv::Point2d, cv::Point2d> features(int p) const {
-//      int i = point_keypoints_[p];
-//      int j = matches_[0][i];
-//      return std::make_pair(keypoints_[0][i].pt, keypoints_[1][j].pt);
-//    }
+    const std::pair<cv::Point2f, cv::Point2f> features(int p) const {
+      int i = point_keypoints_[p];
+      int j = matches_[0][i];
+      return std::make_pair(keypoints_[0][i].pt, keypoints_[1][j].pt);
+    }
 
     // For 0 <= p < points_.size return left and right descriptor for the
     // corresponding point.

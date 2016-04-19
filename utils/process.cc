@@ -10,6 +10,7 @@
 #include "raw_video_reader.h"
 #include "rigid_estimator.hpp"
 #include "timer.hpp"
+#include "util.hpp"
 
 using namespace std;
 
@@ -76,15 +77,23 @@ class CrossFrameProcessor {
 
       buildClique_(p1, p2);
 
+      cout << "Matches = " << full_matches_.size() << "; clique = " << clique_points_[0].size() << endl;
+
       if (clique_points_[0].size() < 10) {
         return false;
       }
 
       estimator_.estimate(clique_points_[1], clique_points_[0]);
 
-//      cout << "Reprojection error: " << reprojectionError_() << endl;
+      cout << "Reprojection error 1 -> 0: " << 
+        reprojectionError_(1, rot(), t(), p1.Pl(), p1.Pr()) << endl;
 
-      cout << "R = " << rot() << "; t = " << t() << endl;
+      cout << "Reprojection error 0 -> 1: " <<
+        reprojectionError_(0, rot().t(), -rot().t() * t(), p1.Pl(), p1.Pr()) << endl;
+
+      //cout << "Reprojection error: " << reprojectionError_() << endl;
+
+      cout << "dR = " << rot() << "; dt = " << t() << endl;
       return true;
     }
 
@@ -150,26 +159,36 @@ class CrossFrameProcessor {
 
       clique_points_[0].resize(clique.size());
       clique_points_[1].resize(clique.size());
+      clique_features_[0].resize(clique.size());
+      clique_features_[1].resize(clique.size());
       for (int i=0; i < clique.size(); ++i) {
         clique_points_[0][i] = full_matches_[clique[i]].p1;
         clique_points_[1][i] = full_matches_[clique[i]].p2;
+        clique_features_[0][i] = p1.features(full_matches_[clique[i]].i1);
+        clique_features_[1][i] = p2.features(full_matches_[clique[i]].i2);
       }
-
-//      clique_2d_3d_points_[0].resize(clique_.size());
-//      clique_2d_3d_points_[0].resize(clique_.size());
-//      for (int i=0; i < clique_.size(); ++) {
-//        const auto& match = full_matches_[clique_[i]];
-//        
-//        const auto f1 = p1.features(match.i1);
-//        const auto f2 = p2.features(match.i2);
-//
-//        clique_2d_3d_points_[0][i] = std::make_pair(f1, match.p2);
-//        clique_2d_3d_points_[1][i] = std::make_pair(p2, match.p1);
-//      }
     }
 
-//    double reprojectionError_() {
-//    }
+    double reprojectionError_(
+        int t,
+        const cv::Mat& R, 
+        const cv::Point3d& tm, 
+        const cv::Mat& Pl, 
+        const cv::Mat& Pr) {
+      double res = 0;
+
+      for (int i=0; i < clique_points_[t].size(); ++i) {
+        auto transformed = (R*clique_points_[t][i] + tm);
+
+        cv::Point2f left = projectPoint(Pl, transformed);
+        cv::Point2f right = projectPoint(Pr, transformed);
+
+        return norm2(left - clique_features_[1-t][i].first) + 
+          norm2(right - clique_features_[1-1][i].second);
+      }
+
+      return res / clique_points_[0].size();
+    }
 //
 //    double halfReprojectionError_(
 //        int t, const FrameProcessor& p, const cv::Mat& rot, const cv::Point3d& t) {
@@ -196,7 +215,7 @@ class CrossFrameProcessor {
     vector<cv::Point3d> clique_points_[2];
     // Original features (or rather their locations) from the first and second frames
     // respectively
-    vector<std::pair<cv::Point2d, cv::Point2d>> clique_features_[2];
+    vector<std::pair<cv::Point2f, cv::Point2f>> clique_features_[2];
     // estimator
     RigidEstimator estimator_;
 };
@@ -272,6 +291,9 @@ int main(int argc, char** argv) {
 
   int frame_index = 0;
 
+  cv::Mat camR = cv::Mat::eye(3, 3, CV_64F);
+  cv::Point3d camT = cv::Point3d(0, 0, 0);
+
   bool done = false;
   while (!done) {
     timer.mark();
@@ -292,6 +314,12 @@ int main(int argc, char** argv) {
       cross_processor.process(
           frame_processors[!(frame_index & 1)],
           processor);
+
+      camT = camR*cross_processor.t() + camT;
+      camR = camR*cross_processor.rot();
+
+      std::cout << "R = " << camR << endl;
+      std::cout << "T = " << camT << endl;
     }
 
     // Render

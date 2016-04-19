@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "rigid_estimator.hpp"
+#include "util.hpp"
 
 using namespace std;
 
@@ -30,9 +31,7 @@ void RigidEstimator::estimate(
   rot_ = (svd.u * svd.vt).t();
 
   cv::Mat_<double>& r = static_cast<cv::Mat_<double>&>(rot_);
-  t_ = c2 - cv::Point3d(r(0, 0) * c1.x + r(0, 1) * c1.y + r(0, 2) * c1.z,
-                        r(1, 0) * c1.x + r(1, 1) * c1.y + r(1, 2) * c1.z,
-                        r(2, 0) * c1.x + r(2, 1) * c1.y + r(2, 2) * c1.z);
+  t_ = c2 - r*c1;
 }
 
 cv::Point3d RigidEstimator::center(vector<cv::Point3d>& pts) {
