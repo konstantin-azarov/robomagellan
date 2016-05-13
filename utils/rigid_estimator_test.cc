@@ -6,6 +6,7 @@
 
 #include "catch.hpp"
 #include "rigid_estimator.hpp"
+#include "util.hpp"
 
 const double EPS = 1E-10;
 
@@ -29,76 +30,6 @@ std::pair<std::vector<cv::Point3d>,
   return std::make_pair(src, transformed);
 }
 
-cv::Mat rotX(double angle) {
-  cv::Mat res = cv::Mat::eye(3, 3, CV_64FC1);
-  cv::Mat_<double>& r = static_cast<cv::Mat_<double>&>(res);
-
-  double c = cos(angle);
-  double s = sin(angle);
-
-  r(1, 1) = c;
-  r(1, 2) = -s;
-  r(2, 1) = s;
-  r(2, 2) = c;
-
-  return res;
-}
-
-cv::Mat rotY(double angle) {
-  cv::Mat res = cv::Mat::eye(3, 3, CV_64FC1);
-  cv::Mat_<double>& r = static_cast<cv::Mat_<double>&>(res);
-
-  double c = cos(angle);
-  double s = sin(angle);
-
-  r(0, 0) = c;
-  r(0, 2) = s;
-  r(2, 0) = -s;
-  r(2, 2) = c;
-
-  return res;
-}
-
-cv::Mat rotZ(double angle) {
-  cv::Mat res = cv::Mat::eye(3, 3, CV_64FC1);
-  cv::Mat_<double>& r = static_cast<cv::Mat_<double>&>(res);
-
-  double c = cos(angle);
-  double s = sin(angle);
-
-  r(0, 0) = c;
-  r(0, 1) = -s;
-  r(1, 0) = s;
-  r(1, 1) = c;
-
-  return res;
-}
-
-bool compareMats(const cv::Mat& l, const cv::Mat& r) {
-  for (int i=0; i < 3; ++i) {
-    for (int j=0; j < 3; ++j) {
-      if (std::abs(l.at<double>(i, j) - r.at<double>(i, j)) > EPS) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
-bool comparePoints(const cv::Point3d& l, const cv::Point3d& r) {
-  if (std::abs(l.x - r.x) > EPS) {
-    return false;
-  }
-  if (std::abs(l.y - r.y) > EPS) {
-    return false;
-  }
-  if (std::abs(l.z - r.z) > EPS) {
-    return false;
-  }
-  return true;
-}
-
 void testRegularPoints(cv::Mat r, cv::Point3d t) {
   RigidEstimator estimator;
   
@@ -106,11 +37,11 @@ void testRegularPoints(cv::Mat r, cv::Point3d t) {
   
   estimator.estimate(pts.first, pts.second);
 
-  if (!compareMats(estimator.rot(), r)) {
+  if (!compareMats(estimator.rot(), r, EPS)) {
     std::cerr << "Expected: " << r << "got: " << estimator.rot() << std::endl;
     REQUIRE(false);
   }
-  REQUIRE(comparePoints(estimator.t(), t));
+  REQUIRE(comparePoints(estimator.t(), t, EPS));
 }
 
 TEST_CASE("Rigid estimator", "[RigidEstimator]") {

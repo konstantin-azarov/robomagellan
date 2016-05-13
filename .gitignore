@@ -1,6 +1,11 @@
-utils/build
 utils/video
 
 *.pyc
 .*.swp
 .*.swo
+
+bazel-bin
+bazel-genfiles
+bazel-out
+bazel-testlogs
+bazel-utils

@@ -3,6 +3,7 @@ project('robomagellan', 'cpp')
 opencv = dependency('opencv')
 boost_options = dependency('boost', modules: ['program_options'])
 uvc = find_library('uvc', required : false)
+ceres = find_library('ceres', required : true)
 
 executable('capture', 
   sources : [
@@ -20,6 +21,12 @@ executable('process',
     'rigid_estimator.cc',
     'clique.cc'],
   dependencies: [ opencv, boost_options ] )
+
+library('reprojection_estimator_lib',
+  sources : [
+    'reprojection_estimator.cc'
+  ],
+  dependencies: [ ceres ])
 
 rigid_estimator_test = executable('rigid_estimator_test',
   sources : [
