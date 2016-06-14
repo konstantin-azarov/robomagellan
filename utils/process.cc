@@ -1,16 +1,19 @@
 #include <boost/program_options.hpp>
 #include <opencv2/opencv.hpp>
-#include <opencv2/nonfree/features2d.hpp>
 
 #include <assert.h>
 
 #include "average.hpp"
+#include "backward.hpp"
+#include "calibration_data.hpp"
 #include "clique.hpp"
 #include "fps_meter.hpp"
+#include "frame_processor.hpp"
+#include "math3d.hpp"
 #include "raw_video_reader.h"
+#include "reprojection_estimator.hpp"
 #include "rigid_estimator.hpp"
 #include "timer.hpp"
-#include "util.hpp"
 
 using namespace std;
 
@@ -18,26 +21,6 @@ namespace po = boost::program_options;
 
 const int frame_width = 640;
 const int frame_height = 480;
-
-struct CalibData {
-  cv::Mat Ml, dl, Mr, dr, R, T;
-
-  static CalibData read(const string& filename) {
-    cv::FileStorage fs(filename, cv::FileStorage::READ);
-
-    CalibData res;
-    fs["Ml"] >> res.Ml;
-    fs["dl"] >> res.dl;
-    fs["Mr"] >> res.Mr;
-    fs["dr"] >> res.dr;
-    fs["R"] >> res.R;
-    fs["T"] >> res.T;
-
-    return res;
-  }
-};
-
-#include "frame_processor.inl"
 
 const double CROSS_POINT_DIST_THRESHOLD = 20; // mm
 
@@ -55,7 +38,8 @@ struct CrossFrameMatch {
 
 class CrossFrameProcessor {
   public:
-    CrossFrameProcessor() {
+    CrossFrameProcessor(const StereoIntrinsics* intrinsics) 
+      : intrinsics_(*intrinsics), reprojection_estimator_(intrinsics) {
     }
 
     bool process(const FrameProcessor& p1, const FrameProcessor& p2) {
@@ -83,22 +67,26 @@ class CrossFrameProcessor {
         return false;
       }
 
-      estimator_.estimate(clique_points_[1], clique_points_[0]);
+      rigid_estimator_.estimate(clique_points_[0], clique_points_[1]);
+      reprojection_estimator_.estimate(reprojection_features_);
 
-      cout << "Reprojection error 1 -> 0: " << 
-        reprojectionError_(1, rot(), t(), p1.Pl(), p1.Pr()) << endl;
+      auto rigid_errors = reprojectionError_(
+          rigid_estimator_.rot(), rigid_estimator_.t());
+      cout << "Reprojection errors rigid ([1->2] [2->1]):" 
+        << rigid_errors.first << " " << rigid_errors.second  << endl;
 
-      cout << "Reprojection error 0 -> 1: " <<
-        reprojectionError_(0, rot().t(), -rot().t() * t(), p1.Pl(), p1.Pr()) << endl;
-
-      //cout << "Reprojection error: " << reprojectionError_() << endl;
+      auto reprojection_errors = reprojectionError_(
+          reprojection_estimator_.rot(), reprojection_estimator_.t());
+      cout << "Reprojection errors reprojection ([1->2] [2->1]):" 
+        << reprojection_errors.first << " " << reprojection_errors.second  << endl;
 
       cout << "dR = " << rot() << "; dt = " << t() << endl;
+
       return true;
     }
 
-    const cv::Mat& rot() const { return estimator_.rot(); }
-    const cv::Point3d& t() const { return estimator_.t(); } 
+    const cv::Mat& rot() const { return reprojection_estimator_.rot(); }
+    const cv::Point3d& t() const { return reprojection_estimator_.t(); } 
 
   private:
     void match(
@@ -159,51 +147,45 @@ class CrossFrameProcessor {
 
       clique_points_[0].resize(clique.size());
       clique_points_[1].resize(clique.size());
-      clique_features_[0].resize(clique.size());
-      clique_features_[1].resize(clique.size());
+      reprojection_features_.resize(clique.size());
       for (int i=0; i < clique.size(); ++i) {
-        clique_points_[0][i] = full_matches_[clique[i]].p1;
-        clique_points_[1][i] = full_matches_[clique[i]].p2;
-        clique_features_[0][i] = p1.features(full_matches_[clique[i]].i1);
-        clique_features_[1][i] = p2.features(full_matches_[clique[i]].i2);
+        const auto& m = full_matches_[clique[i]];
+
+        clique_points_[0][i] = m.p1;
+        clique_points_[1][i] = m.p2;
+
+        auto& f = reprojection_features_[i];
+
+        f.r1 = m.p1;
+        f.r2 = m.p2;
+        std::tie(f.s1l, f.s1r) = p1.features(m.i1);
+        std::tie(f.s2l, f.s2r) = p2.features(m.i2);
       }
     }
 
-    double reprojectionError_(
-        int t,
+    // Reprojection error 1 -> 2 & 2 -> 1
+    // R and tm transform 1 into 2
+    std::pair<double, double> reprojectionError_(
         const cv::Mat& R, 
-        const cv::Point3d& tm, 
-        const cv::Mat& Pl, 
-        const cv::Mat& Pr) {
-      double res = 0;
+        const cv::Point3d& tm) {
+      double res1 = 0, res2 = 0;
 
-      for (int i=0; i < clique_points_[t].size(); ++i) {
-        auto transformed = (R*clique_points_[t][i] + tm);
+      for (auto f : reprojection_features_) {
+        auto p1 = projectPoint(intrinsics_, R.t()*(f.r2 - tm));
+        auto p2 = projectPoint(intrinsics_, R*f.r1 + tm);
 
-        cv::Point2f left = projectPoint(Pl, transformed);
-        cv::Point2f right = projectPoint(Pr, transformed);
-
-        return norm2(left - clique_features_[1-t][i].first) + 
-          norm2(right - clique_features_[1-1][i].second);
+        res1 += norm2(p1.first - f.s1l) + norm2(p1.second - f.s1r);
+        res2 += norm2(p2.first - f.s2l) + norm2(p2.second - f.s2r);
       }
 
-      return res / clique_points_[0].size();
+      int n = reprojection_features_.size();
+
+      return make_pair(res1 / n, res2 / n);
     }
-//
-//    double halfReprojectionError_(
-//        int t, const FrameProcessor& p, const cv::Mat& rot, const cv::Point3d& t) {
-//      for (int i=0; i < clique_.size(); ++) {
-//        const auto& m = full_matches_[clique[i]];
-//        
-//        const auto& point = t == 0 ? m.p1 : m.p2;
-//        const auto& features = p.features(t == 0 ? m.i2 : m.i1);
-//
-//        auto transformed_point = transformPoint(point, rot, t);
-//        auto projected_point = projectPoint(transformed_point, 
-//      }
-//    }
-//
+  
   private:
+    const StereoIntrinsics& intrinsics_;
+
     // matches[0][i] - best match in the second frame for i-th feature in the first frame
     // matches[1][j] - best match in the first frame for j-th feature in the second frame
     vector<int> matches_[2];
@@ -215,9 +197,10 @@ class CrossFrameProcessor {
     vector<cv::Point3d> clique_points_[2];
     // Original features (or rather their locations) from the first and second frames
     // respectively
-    vector<std::pair<cv::Point2f, cv::Point2f>> clique_features_[2];
-    // estimator
-    RigidEstimator estimator_;
+    vector<ReprojectionFeature> reprojection_features_;
+    // estimators
+    RigidEstimator rigid_estimator_;
+    ReprojectionEstimator reprojection_estimator_;
 };
 
 void onMouse(int event, int x, int y, int flags, void* ptr) {
@@ -227,6 +210,8 @@ void onMouse(int event, int x, int y, int flags, void* ptr) {
     p->printKeypointInfo(x, y);
   }
 }
+
+backward::SignalHandling sh;
 
 int main(int argc, char** argv) {
   string video_file, calib_file;
@@ -257,13 +242,13 @@ int main(int argc, char** argv) {
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
   
-  CalibData calib = CalibData::read(calib_file);
+  CalibrationData calib = CalibrationData::read(calib_file, frame_width, frame_height);
 
   FrameProcessor frame_processors[] = {
-    FrameProcessor(calib, frame_width, frame_height),
-    FrameProcessor(calib, frame_width, frame_height)
+    FrameProcessor(calib),
+    FrameProcessor(calib)
   };
-  CrossFrameProcessor cross_processor;
+  CrossFrameProcessor cross_processor(&calib.intrinsics);
 
   RawVideoReader rdr(video_file, frame_width*2, frame_height);
   uint8_t frame_data[frame_width*2*frame_height];

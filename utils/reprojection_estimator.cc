@@ -4,7 +4,8 @@
 #include <opencv2/opencv.hpp>
 
 #include "reprojection_estimator.hpp"
-#include "util.hpp"
+
+#include "math3d.hpp"
 
 using ceres::AutoDiffCostFunction;
 using ceres::CostFunction;
@@ -12,6 +13,7 @@ using ceres::Problem;
 using ceres::Solver;
 using ceres::QuaternionParameterization;
 using ceres::UnitQuaternionRotatePoint;
+using ceres::QuaternionToRotation;
 using ceres::Solve;
 
 template <class T>
@@ -20,7 +22,7 @@ struct ForwardTransform {
     T p1[3];
 
     UnitQuaternionRotatePoint(q, p0, p1);
-    
+
     p[0] = p1[0] + t[0];
     p[1] = p1[1] + t[1];
     p[2] = p1[2] + t[2];
@@ -52,14 +54,14 @@ class ReprojectionError {
       T p0[3] = { T(r_.x), T(r_.y), T(r_.z) };
       T p[3];
 
-      Transform<T>::t(p0, t, q, p);
-    
+      Transform<T>::t(p0, q, t, p);
+
       // Project
       T v = T(c_->f) * p[1] / p[2] + T(c_->cy);
 
       e[0] = T(c_->f) * p[0] / p[2] + T(c_->cxl - sl_.x);
       e[1] = v - T(sl_.y);
-      e[2] = T(c_->f) * (p[0] + T(c_->dr)) / p[2] + T(c_->cxr - sr_.x);
+      e[2] = (T(c_->f) * p[0] + T(c_->dr)) / p[2] + T(c_->cxr - sr_.x);
       e[3] = v - T(sr_.y);
 
       return true;
@@ -78,7 +80,7 @@ ReprojectionEstimator::ReprojectionEstimator(const StereoIntrinsics* intrinsics)
   intrinsics_(intrinsics) {
 }
 
-void ReprojectionEstimator::estimate(
+bool ReprojectionEstimator::estimate(
     const std::vector<ReprojectionFeature>& features) {
 
   double q[4] = { 1, 0, 0, 0 };
@@ -93,22 +95,29 @@ void ReprojectionEstimator::estimate(
   for (auto f : features) {
     problem.AddResidualBlock(
         new AutoDiffCostFunction<ForwardResidual, 4, 4, 3>(
-          new ForwardResidual(f.r2, f.s1l, f.s1r, intrinsics_)),
+          new ForwardResidual(f.r1, f.s2l, f.s2r, intrinsics_)),
         nullptr,
         allParameterBlocks);
 
     problem.AddResidualBlock(
         new AutoDiffCostFunction<ReverseResidual, 4, 4, 3>(
-          new ReverseResidual(f.r1, f.s2l, f.s2r, intrinsics_)),
+          new ReverseResidual(f.r2, f.s1l, f.s1r, intrinsics_)),
         nullptr,
         allParameterBlocks);
   }
 
   Solver::Options options;
   options.linear_solver_type = ceres::DENSE_QR;
-  options.minimizer_progress_to_stdout = true;
+  options.minimizer_progress_to_stdout = false;
   Solver::Summary summary;
   Solve(options, &problem, &summary);
 
-  std::cout << summary.BriefReport() << "\n";
+  rot_.create(3, 3, CV_64F);
+  QuaternionToRotation(q, reinterpret_cast<double*>(rot_.data));
+
+  t_.x = t[0];
+  t_.y = t[1];
+  t_.z = t[2];
+  
+  return true;
 }

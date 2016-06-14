@@ -1,11 +1,9 @@
 #include <assert.h>
 #include <opencv2/opencv.hpp>
 
-struct StereoIntrinsics {
-  double f, dr, cxl, cxr, cy;
-};
+#include "math3d.hpp"
 
-inline cv::Point3d operator * (const cv::Mat& m, const cv::Point3d& p) {
+cv::Point3d operator * (const cv::Mat& m, const cv::Point3d& p) {
   assert(m.rows == 3 && m.cols == 3);
 
   const cv::Mat_<double>& r = static_cast<const cv::Mat_<double>&>(m);
@@ -15,7 +13,7 @@ inline cv::Point3d operator * (const cv::Mat& m, const cv::Point3d& p) {
                      r(2, 0) * p.x + r(2, 1) * p.y + r(2, 2) * p.z);
 }
 
-inline cv::Point2f projectPoint(const cv::Mat& m, const cv::Point3d& p) {
+cv::Point2f projectPoint(const cv::Mat& m, const cv::Point3d& p) {
   assert(m.rows == 3 && m.cols == 4);
   
   const cv::Mat_<double>& P = static_cast<const cv::Mat_<double>&>(m);
@@ -24,7 +22,7 @@ inline cv::Point2f projectPoint(const cv::Mat& m, const cv::Point3d& p) {
                      (P(1, 1) * p.y + P(1, 2) * p.z)/p.z);
 }
 
-inline std::pair<cv::Point2d, cv::Point2d> projectPoint(
+std::pair<cv::Point2d, cv::Point2d> projectPoint(
     const StereoIntrinsics& i, 
     const cv::Point3d& p) {
 
@@ -106,6 +104,6 @@ bool comparePoints(const cv::Point3d& l, const cv::Point3d& r, double eps) {
 }
 
 
-inline double norm2(const cv::Point2f& pt) {
+double norm2(const cv::Point2f& pt) {
   return pt.x*pt.x + pt.y*pt.y;
 }

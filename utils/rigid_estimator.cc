@@ -2,7 +2,8 @@
 #include <vector>
 
 #include "rigid_estimator.hpp"
-#include "util.hpp"
+
+#include "math3d.hpp"
 
 using namespace std;
 

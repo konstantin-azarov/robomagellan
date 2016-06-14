@@ -1,7 +1,7 @@
 #ifndef __TIMER__HPP__
 #define __TIMER__HPP__
 
-#include <utils.hpp>
+#include "utils.hpp"
 
 class Timer {
   public:

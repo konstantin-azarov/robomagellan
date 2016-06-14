@@ -5,8 +5,10 @@
 #include <random>
 
 #include "catch.hpp"
+
 #include "rigid_estimator.hpp"
-#include "util.hpp"
+
+#include "math3d.hpp"
 
 const double EPS = 1E-10;
 
