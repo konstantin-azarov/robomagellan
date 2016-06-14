@@ -107,3 +107,14 @@ bool comparePoints(const cv::Point3d& l, const cv::Point3d& r, double eps) {
 double norm2(const cv::Point2f& pt) {
   return pt.x*pt.x + pt.y*pt.y;
 }
+
+double norm3(const cv::Point3d& pt) {
+  return pt.x*pt.x + pt.y*pt.y + pt.z*pt.z;
+}
+
+double descriptorDist(const cv::Mat& a, const cv::Mat& b) {
+  assert(a.rows == 1 && b.rows == 1 && a.cols == b.cols);
+  assert(a.type() == CV_8UC1 && b.type() == CV_8UC1);
+
+  return cv::norm(a, b, cv::NORM_HAMMING);
+}

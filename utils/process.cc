@@ -105,8 +105,8 @@ class CrossFrameProcessor {
         for (int j = 0; j < points2.size(); ++j) {
           auto right_descs = p2.pointDescriptors(j);
 
-          double d1 = cv::norm(left_descs.first, right_descs.first);
-          double d2 = cv::norm(left_descs.second, right_descs.second);
+          double d1 = descriptorDist(left_descs.first, right_descs.first);
+          double d2 = descriptorDist(left_descs.second, right_descs.second);
 
           double d = max(d1, d2);
 
@@ -134,8 +134,8 @@ class CrossFrameProcessor {
         for (int j = 0; j < i; ++j) {
           auto& m1 = full_matches_[i];
           auto& m2 = full_matches_[j];
-          double d1 = cv::norm(m1.p1 - m2.p1);
-          double d2 = cv::norm(m1.p2 - m2.p2);
+          double d1 = norm3(m1.p1 - m2.p1);
+          double d2 = norm3(m1.p2 - m2.p2);
           
           if (abs(d1 - d2) < CROSS_POINT_DIST_THRESHOLD) {
             clique_.addEdge(i, j);
@@ -296,15 +296,16 @@ int main(int argc, char** argv) {
     processTime.sample(timer.mark());
 
     if (frame_index != 0) {
-      cross_processor.process(
-          frame_processors[!(frame_index & 1)],
-          processor);
+      if (cross_processor.process(
+             frame_processors[!(frame_index & 1)],
+             processor)) {
+        camT = camR*cross_processor.t() + camT;
+        camR = camR*cross_processor.rot();
 
-      camT = camR*cross_processor.t() + camT;
-      camR = camR*cross_processor.rot();
+        std::cout << "R = " << camR << endl;
+        std::cout << "T = " << camT << endl;
+      }
 
-      std::cout << "R = " << camR << endl;
-      std::cout << "T = " << camT << endl;
     }
 
     // Render

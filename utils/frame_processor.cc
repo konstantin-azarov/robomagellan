@@ -3,6 +3,7 @@
 
 #include "calibration_data.hpp"
 #include "frame_processor.hpp"
+#include "math3d.hpp"
 
 struct Match {
   int leftIndex, rightIndex;
@@ -20,8 +21,10 @@ void FrameProcessor::process(const cv::Mat src[], cv::Mat& debug) {
         calib_->undistortMaps[i].y, 
         cv::INTER_LINEAR);
 
-    cv::SURF surf;
-    surf(undistorted_image_[i], cv::noArray(), keypoints_[i], descriptors_[i]);
+    cv::BRISK detector;
+    detector(undistorted_image_[i], cv::noArray(), keypoints_[i], descriptors_[i]);
+
+    std::cout << "Frame " << i << ": " << keypoints_[i].size() << std::endl;
 
     order_[i].resize(keypoints_[i].size());
     for (int j=0; j < order_[i].size(); ++j) {
@@ -104,7 +107,7 @@ void FrameProcessor::match(const std::vector<cv::KeyPoint>& kps1,
       double dx = inv*(pt1.x - pt2.x);
 
       if (dx > 0 && dx < 100) {
-        double dist = cv::norm(desc1.row(i) - desc2.row(j));
+        double dist = descriptorDist(desc1.row(i), desc2.row(j));
         if (dist < best_d) {
           best_d = dist;
           best_j = j;
@@ -113,8 +116,10 @@ void FrameProcessor::match(const std::vector<cv::KeyPoint>& kps1,
         }
       }
     }
-    
-    if (best_j > -1 && best_d / second_d < 0.8) {
+   
+    std::cout << best_d << " " << second_d << std::endl;
+
+    if (best_j > -1 /* && best_d / second_d < 0.8*/) {
       matches[i] = best_j;
     }
   }

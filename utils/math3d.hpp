@@ -26,4 +26,8 @@ bool comparePoints(const cv::Point3d& l, const cv::Point3d& r, double eps);
 
 double norm2(const cv::Point2f& pt);
 
+double norm3(const cv::Point3d& pt);
+
+double descriptorDist(const cv::Mat& a, const cv::Mat& b);
+
 #endif
