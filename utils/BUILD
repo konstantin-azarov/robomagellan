@@ -28,6 +28,13 @@ cc_test(
     copts=COPTS)
 
 cc_library(
+    name="cross_frame_processor_lib",
+    srcs=["cross_frame_processor.cc"],
+    hdrs=["cross_frame_processor.hpp"],
+    copts=COPTS,
+    linkopts=["-lopencv_core"])
+
+cc_library(
     name="frame_processor_lib",
     srcs=["frame_processor.cc"],
     hdrs=["frame_processor.hpp"],
@@ -79,6 +86,7 @@ cc_binary(
     deps=[":backward",
           ":calibration_data_lib",
           ":clique_lib", 
+          ":cross_frame_processor_lib",
           ":frame_processor_lib",
           ":rigid_estimator_lib", 
           ":reprojection_estimator_lib"],

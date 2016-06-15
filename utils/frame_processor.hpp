@@ -12,18 +12,9 @@ class FrameProcessor {
     
     void process(const cv::Mat src[], cv::Mat& debug);
 
-    void match(const std::vector<cv::KeyPoint>& kps1,
-               const std::vector<int>& idx1,
-               const cv::Mat& desc1,
-               const std::vector<cv::KeyPoint>& kps2,
-               const std::vector<int>& idx2,
-               const cv::Mat& desc2,
-               int inv,
-               std::vector<int>& matches);
-
-    void drawDebugImage(cv::Mat& debug);
-    
-    void printKeypointInfo(int x, int y) const;
+    const cv::Mat& undistortedImage(int i) const { 
+      return undistorted_image_[i];
+    }
 
     const std::vector<cv::Point3d>& points() const {
       return points_;
@@ -37,6 +28,7 @@ class FrameProcessor {
       return std::make_pair(keypoints_[0][i].pt, keypoints_[1][j].pt);
     }
 
+
     // For 0 <= p < points_.size() return left and right descriptor for the
     // corresponding point.
     const std::pair<cv::Mat, cv::Mat> pointDescriptors(int p) const {
@@ -45,6 +37,21 @@ class FrameProcessor {
 
       return std::make_pair(descriptors_[0].row(i), descriptors_[1].row(j));
     }
+
+
+  private:
+    void match(const std::vector<cv::KeyPoint>& kps1,
+               const std::vector<int>& idx1,
+               const cv::Mat& desc1,
+               const std::vector<cv::KeyPoint>& kps2,
+               const std::vector<int>& idx2,
+               const cv::Mat& desc2,
+               int inv,
+               std::vector<int>& matches);
+
+    void drawDebugImage(cv::Mat& debug);
+    
+    void printKeypointInfo(int x, int y) const;
 
   private:
     const CalibrationData* calib_;
