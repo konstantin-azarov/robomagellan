@@ -29,13 +29,15 @@ class FrameProcessor {
       return points_;
     }
 
+    // For 0 <= p < points_.size() return left and right features for the 
+    // corresponding point.
     const std::pair<cv::Point2f, cv::Point2f> features(int p) const {
       int i = point_keypoints_[p];
       int j = matches_[0][i];
       return std::make_pair(keypoints_[0][i].pt, keypoints_[1][j].pt);
     }
 
-    // For 0 <= p < points_.size return left and right descriptor for the
+    // For 0 <= p < points_.size() return left and right descriptor for the
     // corresponding point.
     const std::pair<cv::Mat, cv::Mat> pointDescriptors(int p) const {
       int i = point_keypoints_[p];
