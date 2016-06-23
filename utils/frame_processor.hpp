@@ -10,7 +10,7 @@ class FrameProcessor {
   public:
     FrameProcessor(const CalibrationData& calib);
     
-    void process(const cv::Mat src[], cv::Mat& debug);
+    void process(const cv::Mat src[], int threshold=60);
 
     const cv::Mat& undistortedImage(int i) const { 
       return undistorted_image_[i];
@@ -39,6 +39,10 @@ class FrameProcessor {
     }
 
 
+    const std::vector<int> pointKeypoints() const { return point_keypoints_; }
+    const std::vector<cv::KeyPoint>& keypoints(int t) const  { return keypoints_[t]; }
+    const std::vector<int>& matches(int t) const { return matches_[t]; }
+    
   private:
     void match(const std::vector<cv::KeyPoint>& kps1,
                const std::vector<int>& idx1,
@@ -48,10 +52,6 @@ class FrameProcessor {
                const cv::Mat& desc2,
                int inv,
                std::vector<int>& matches);
-
-    void drawDebugImage(cv::Mat& debug);
-    
-    void printKeypointInfo(int x, int y) const;
 
   private:
     const CalibrationData* calib_;

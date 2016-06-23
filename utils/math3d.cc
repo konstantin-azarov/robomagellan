@@ -117,4 +117,6 @@ double descriptorDist(const cv::Mat& a, const cv::Mat& b) {
   assert(a.type() == CV_8UC1 && b.type() == CV_8UC1);
 
   return cv::norm(a, b, cv::NORM_HAMMING);
+//
+//  return cv::norm(a, b);
 }

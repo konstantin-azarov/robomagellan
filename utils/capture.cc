@@ -150,8 +150,6 @@ int main(int argc, char **argv) {
   uint8_t buffer[FRAME_SIZE*2];
 
   cv::Mat combined(FRAME_HEIGHT, FRAME_WIDTH*2, CV_8UC1, buffer);
-  cv::Mat left(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC1);
-  cv::Mat right(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC1);
 
 
   int current_snapshot_index = 0;
@@ -198,10 +196,11 @@ int main(int argc, char **argv) {
       case 32:
         printf("Snapshot %d!\n", ++current_snapshot_index);
 
-        uncombine(buffer, left.ptr(), right.ptr());
-        cv::imwrite(str(format("%s/left_%d.png") % snapshots_dir % current_snapshot_index), left);
-        cv::imwrite(str(format("%s/right_%d.png") % snapshots_dir % current_snapshot_index), right);
-
+        cv::imwrite(
+            str(format("%s/snapshot_%d.bmp") % 
+              snapshots_dir % 
+              current_snapshot_index), 
+            combined);
         break;
       case 'r':
         if (video_sink == nullptr) {

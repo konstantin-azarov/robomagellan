@@ -13,9 +13,7 @@ def trueCorners(cnt):
             res.append((j*CHESSBOARD_STEP, i*CHESSBOARD_STEP, 0))
     return [numpy.array(res, numpy.float32)]*cnt
 
-def extractCornersFromImage(filename):
-    img = cv2.cvtColor(cv2.imread(filename), cv2.COLOR_BGR2GRAY)
-
+def extractCornersFromImage(img):
     res, corners = cv2.findChessboardCorners(
             img, 
             (CHESSBOARD_WIDTH, CHESSBOARD_HEIGHT), 
@@ -30,6 +28,9 @@ def extractCornersFromImage(filename):
 
     return img, corners
 
+def snapshotFileName(i):
+    return os.path.join(snapshots_dir, "snapshot_%d.bmp" % i)
+
 all_left_corners = []
 all_right_corners = []
 matching_left_corners = []
@@ -38,9 +39,11 @@ matching_right_corners = []
 snapshots_dir = "snapshots/calibration"
 
 i = 1
-while os.path.isfile(os.path.join(snapshots_dir, "left_%d.png" % i)):
-    img_left, corners_left = extractCornersFromImage(os.path.join(snapshots_dir, "left_%d.png" % i))
-    img_right, corners_right = extractCornersFromImage(os.path.join(snapshots_dir, "right_%d.png" % i))
+while os.path.isfile(snapshotFileName(i)):
+    img = cv2.imread(snapshotFileName(i), cv2.IMREAD_GRAYSCALE)
+    w = img.shape[1]/2
+    img_left, corners_left = extractCornersFromImage(img[:, 0:w])
+    img_right, corners_right = extractCornersFromImage(img[:, w:2*w])
 
     if corners_left is not None and corners_right is not None:
         matching_left_corners.append(corners_left)
@@ -64,61 +67,82 @@ calib_flags = (cv2.CALIB_RATIONAL_MODEL +
               cv2.CALIB_ZERO_TANGENT_DIST +
               cv2.CALIB_FIX_K3 + cv2.CALIB_FIX_K4 + cv2.CALIB_FIX_K5)
 
-# res, Ml, dl, rvecs, tvecs = cv2.calibrateCamera(
-#     trueCorners(len(all_left_corners)),
-#     all_left_corners,
-#     (640, 480),
-#     None, numpy.zeros(8), None, None,
-#     calib_flags,
-#     criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1E-5))
-# print "Left RMS = ", res
-#
-# res, Mr, dr, rvecs, tvecs = cv2.calibrateCamera(
-#     trueCorners(len(all_right_corners)),
-#     all_right_corners,
-#     (640, 480),
-#     None, numpy.zeros(8), None, None,
-#     calib_flags,
-#     criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1E-5))
-# print "Right RMS = ", res
+res, Ml, dl, rvecs, tvecs = cv2.calibrateCamera(
+     trueCorners(len(all_left_corners)),
+     all_left_corners,
+     (640, 480),
+     None, numpy.zeros(8), None, None,
+     calib_flags,
+     criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1E-5))
+print "Left RMS = ", res
 
-calib_flags = (cv2.CALIB_RATIONAL_MODEL +
-            #  cv2.CALIB_ZERO_TANGENT_DIST +
-            #   cv2.CALIB_FIX_ASPECT_RATIO +
-            #   cv2.CALIB_SAME_FOCAL_LENGTH +
-              cv2.CALIB_FIX_K3 + cv2.CALIB_FIX_K4 + cv2.CALIB_FIX_K5)
+res, Mr, dr, rvecs, tvecs = cv2.calibrateCamera(
+     trueCorners(len(all_right_corners)),
+     all_right_corners,
+     (640, 480),
+     None, numpy.zeros(8), None, None,
+     calib_flags,
+     criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1E-5))
+print "Right RMS = ", res
 
-res, Ml, dl, Mr, dr, R, T, E, F = cv2.stereoCalibrate(
+#print Ml, dl
+#print Mr, dr
+
+calib_flags = cv2.CALIB_FIX_INTRINSIC
+
+res, _, _, _, _, R, T, E, F = cv2.stereoCalibrate(
     trueCorners(len(matching_left_corners)),
     matching_left_corners,
     matching_right_corners,
-    (640, 480),
-    #Ml, dl, Mr, dr,
+    Ml, dl, Mr, dr,
     #numpy.eye(3, 3), numpy.zeros(8), numpy.eye(3, 3), numpy.zeros(8),
+    (640, 480),
     flags=calib_flags,
     criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1E-5))
+
+print R
+print T
+
+print "Calibration reprojection error = ", res
+
+Rl, Rr, Pl, Pr, Q, poi1, poi2 = cv2.stereoRectify(
+    Ml, dl,
+    Mr, dr,
+    (640, 480), R, T,
+    None, None, None, None, None,
+    cv2.CALIB_ZERO_DISPARITY, 0, (640, 480))
+
+print Rl
+print Rr
+print Pl
+print Pr
 
 # Compute reprojection error
 err = 0
 cnt = 0
-for i in xrange(len(matching_left_corners)):
-    left_corners_und = cv2.undistortPoints(matching_left_corners[i], Ml, dl, None, Ml)
-    right_corners_und = cv2.undistortPoints(matching_right_corners[i], Mr, dr, None, Mr)
+for t in xrange(len(matching_left_corners)):
+    left_corners_und = cv2.undistortPoints(matching_left_corners[t], Ml, dl, R=Rl, P=Pl)
+    right_corners_und = cv2.undistortPoints(matching_right_corners[t], Mr, dr, R=Rr, P=Pr)
 
-    left_epilines = cv2.computeCorrespondEpilines(left_corners_und, 1, F)
-    right_epilines = cv2.computeCorrespondEpilines(right_corners_und, 2, F)
+#    left_epilines = cv2.computeCorrespondEpilines(left_corners_und, 1, F)
+#    right_epilines = cv2.computeCorrespondEpilines(right_corners_und, 2, F)
 
-    for i in xrange(len(left_epilines)):
-        l = left_epilines[i].reshape(3)
-        p = right_corners_und[i].reshape(2)
-        err += abs(l[0]*p[0] + l[1]*p[1] + l[2])
+    for i in xrange(len(left_corners_und)):
+        l = left_corners_und[i].reshape(2)
+        r = right_corners_und[i].reshape(2)
+        err += abs(l[1] - r[1])
 
-    for i in xrange(len(right_epilines)):
-        l = right_epilines[i].reshape(3)
-        p = left_corners_und[i].reshape(2)
-        err += abs(l[0]*p[0] + l[1]*p[1] + l[2])
+#    for i in xrange(len(left_epilines)):
+#        l = left_epilines[i].reshape(3)
+#        p = right_corners_und[i].reshape(2)
+#        err += abs(l[0]*p[0] + l[1]*p[1] + l[2])
+#
+#    for i in xrange(len(right_epilines)):
+#        l = right_epilines[i].reshape(3)
+#        p = left_corners_und[i].reshape(2)
+#        err += abs(l[0]*p[0] + l[1]*p[1] + l[2])
 
-    cnt += len(left_epilines)
+    cnt += len(left_corners_und)
 print "Reprojection error = ", err/cnt
 
 def savePyData(f):

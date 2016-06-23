@@ -178,9 +178,9 @@ void Camera::callback(uvc_frame_t* frame) {
   uint8_t* right_data = tmp_buffer_ + frame_width_;
 
   frame_counter_++;
-//  if (frame_counter_ % 2 == 0) {
-//    return;
-//  }
+  if (frame_counter_ % 2 == 0) {
+    return;
+  }
 
   if (frame->data_bytes != frame_width_*frame_height_*2) {
     cerr << "Incomplete frame: " << frame->sequence << " " << frame->data_bytes << endl;

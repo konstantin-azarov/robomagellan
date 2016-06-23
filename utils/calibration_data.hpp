@@ -20,6 +20,9 @@ struct CalibrationData {
   static CalibrationData read(const std::string& filename, int width, int height);
 };
 
+struct RawCalibrationData {
+  cv::Mat Ml, dl, Mr, dr;
+};
 
 
 #endif

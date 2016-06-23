@@ -14,7 +14,7 @@ class FrameProcessor;
 struct CrossFrameMatch {
   CrossFrameMatch() {}
 
-  CrossFrameMatch(const cv::Point3d p1_, const cv::Point3d p2_, int i1_, int i2_) :
+  CrossFrameMatch(const cv::Point3d& p1_, const cv::Point3d& p2_, int i1_, int i2_) :
     p1(p1_), p2(p2_), i1(i1_), i2(i2_) {
   }
 
@@ -32,6 +32,13 @@ class CrossFrameProcessor {
     const cv::Mat& rot() const { return reprojection_estimator_.rot(); }
     const cv::Point3d& t() const { return reprojection_estimator_.t(); } 
 
+    const std::vector<CrossFrameMatch>& fullMatches() const { 
+      return full_matches_; 
+    }
+
+    const std::vector<ReprojectionFeature>& reprojectionFeatures() const {
+      return reprojection_features_;
+    }
   private:
     void match(
         const FrameProcessor& p1, 
