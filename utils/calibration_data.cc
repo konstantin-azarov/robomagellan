@@ -3,27 +3,31 @@
 
 #include "calibration_data.hpp"
 
-CalibrationData CalibrationData::read(
-    const std::string& filename, int width, int height) {
-  cv::Mat Ml, dl, Mr, dr, R, T;
-
+RawCalibrationData RawCalibrationData::read(const std::string& filename) {
+  RawCalibrationData res;
+  
   cv::FileStorage fs(filename, cv::FileStorage::READ);
 
-  fs["Ml"] >> Ml;
-  fs["dl"] >> dl;
-  fs["Mr"] >> Mr;
-  fs["dr"] >> dr;
-  fs["R"] >> R;
-  fs["T"] >> T;
+  fs["size"] >> res.size;
+  fs["Ml"] >> res.Ml;
+  fs["dl"] >> res.dl;
+  fs["Mr"] >> res.Mr;
+  fs["dr"] >> res.dr;
+  fs["R"] >> res.R;
+  fs["T"] >> res.T;
 
+  return res;
+}
+
+CalibrationData::CalibrationData(const RawCalibrationData& raw) {
   CalibrationData res;
   cv::Mat Rl, Rr, Pl, Pr;
 
   cv::stereoRectify(
-      Ml, dl, 
-      Mr, dr, 
-      cv::Size(width, height),
-      R, T,
+      raw.Ml, raw.dl, 
+      raw.Mr, raw.dr, 
+      raw.size,
+      raw.R, raw.T,
       Rl, Rr,
       Pl, Pr,
       res.Q,
@@ -31,14 +35,14 @@ CalibrationData CalibrationData::read(
       0); 
 
   cv::initUndistortRectifyMap(
-      Ml, dl, Rl, Pl, 
-      cv::Size(width, height),
+      raw.Ml, raw.dl, Rl, Pl, 
+      raw.size,
       CV_32FC1,
       res.undistortMaps[0].x, res.undistortMaps[0].y);
 
   cv::initUndistortRectifyMap(
-      Mr, dr, Rr, Pr, 
-      cv::Size(width, height),
+      raw.Mr, raw.dr, Rr, Pr, 
+      raw.size, 
       CV_32FC1,
       res.undistortMaps[1].x, res.undistortMaps[1].y);
 
@@ -59,6 +63,4 @@ CalibrationData CalibrationData::read(
   intrinsics.cxr = P2(0, 2);
   intrinsics.cy = P1(1, 2);
   assert(P2(1, 2) == intrinsics.cy);
-
-  return res;
 }

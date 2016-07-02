@@ -12,16 +12,25 @@ struct UndistortMaps {
   cv::Mat x, y;
 };
 
+struct RawCalibrationData {
+  static RawCalibrationData read(
+      const std::string& filename);
+
+  cv::Size size;
+  cv::Mat Ml, dl, Mr, dr;
+  cv::Mat R, T;
+};
+
 struct CalibrationData {
+  CalibrationData(const RawCalibrationData& raw);
+
   UndistortMaps undistortMaps[2];
   StereoIntrinsics intrinsics;
   cv::Mat Q;
 
-  static CalibrationData read(const std::string& filename, int width, int height);
-};
+ private:
+  CalibrationData() {}
 
-struct RawCalibrationData {
-  cv::Mat Ml, dl, Mr, dr;
 };
 
 
