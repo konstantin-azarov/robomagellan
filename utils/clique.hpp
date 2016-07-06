@@ -1,6 +1,7 @@
 #ifndef __CLIQUE_H__
 #define __CLIQUE_H__
 
+#include <stdint.h>
 #include <vector>
 
 class Clique {

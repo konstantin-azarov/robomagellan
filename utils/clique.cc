@@ -52,14 +52,14 @@ const std::vector<int>& Clique::clique() {
     clique_.push_back(best);
   
     candidates_[1-t].resize(0);
-    for (int i=0; i < candidates_[t].size(); ++i) {
+    for (int i=0; i < (int)candidates_[t].size(); ++i) {
       if (best != candidates_[t][i] && graph_[edge_(best, candidates_[t][i])]) {
         candidates_[1-t].push_back(candidates_[t][i]);
       }
     }
 
     best = -1;
-    for (int i=0; i < candidates_[1-t].size(); ++i) {
+    for (int i=0; i < (int)candidates_[1-t].size(); ++i) {
       if (best == -1 || degrees_[candidates_[1-t][i]] > degrees_[best]) {
        best = candidates_[1-t][i];
       }

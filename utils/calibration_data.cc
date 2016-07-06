@@ -19,9 +19,20 @@ RawCalibrationData RawCalibrationData::read(const std::string& filename) {
   return res;
 }
 
+void RawCalibrationData::write(const std::string& filename) {
+  cv::FileStorage fs(filename, cv::FileStorage::WRITE);
+
+  cv::write(fs, "size", size);
+  cv::write(fs, "Ml", Ml);
+  cv::write(fs, "dl", dl);
+  cv::write(fs, "Mr", Mr);
+  cv::write(fs, "dr", dr);
+  cv::write(fs, "R", R);
+  cv::write(fs, "T", T);
+}
+
 CalibrationData::CalibrationData(const RawCalibrationData& raw) {
-  CalibrationData res;
-  cv::Mat Rl, Rr, Pl, Pr;
+  this->raw = raw;
 
   cv::stereoRectify(
       raw.Ml, raw.dl, 
@@ -30,7 +41,7 @@ CalibrationData::CalibrationData(const RawCalibrationData& raw) {
       raw.R, raw.T,
       Rl, Rr,
       Pl, Pr,
-      res.Q,
+      Q,
       cv::CALIB_ZERO_DISPARITY,
       0); 
 
@@ -38,13 +49,13 @@ CalibrationData::CalibrationData(const RawCalibrationData& raw) {
       raw.Ml, raw.dl, Rl, Pl, 
       raw.size,
       CV_32FC1,
-      res.undistortMaps[0].x, res.undistortMaps[0].y);
+      undistortMaps[0].x, undistortMaps[0].y);
 
   cv::initUndistortRectifyMap(
       raw.Mr, raw.dr, Rr, Pr, 
       raw.size, 
       CV_32FC1,
-      res.undistortMaps[1].x, res.undistortMaps[1].y);
+      undistortMaps[1].x, undistortMaps[1].y);
 
   assert(Pl.rows == 3 && Pl.cols == 4);
   assert(Pr.rows == 3 && Pr.cols == 4);
@@ -52,8 +63,6 @@ CalibrationData::CalibrationData(const RawCalibrationData& raw) {
   const cv::Mat_<double>& P1 = static_cast<const cv::Mat_<double>&>(Pl);
   const cv::Mat_<double>& P2 = static_cast<const cv::Mat_<double>&>(Pr);
 
-  StereoIntrinsics& intrinsics = res.intrinsics;
-  
   intrinsics.f = P1(0, 0);
   assert(P1(1, 1) == intrinsics.f && 
       P2(0, 0) == intrinsics.f && 

@@ -3,12 +3,17 @@
 #include <string>
 #include <iostream>
 
+#define BACKWARD_HAS_DW 1
+
+#include "backward.hpp"
 #include "calibration_data.hpp"
 
 namespace po = boost::program_options;
 
 const int frame_width = 640;
 const int frame_height = 480;
+
+backward::SignalHandling sh;
 
 int main(int argc, char** argv) {
   std::string calib_file, image_file;
@@ -28,13 +33,10 @@ int main(int argc, char** argv) {
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
 
-  auto calib = CalibrationData::read(calib_file, frame_width, frame_height);
+  CalibrationData calib(RawCalibrationData::read(calib_file));
 
   auto src_img = cv::imread(image_file, cv::IMREAD_GRAYSCALE);
   
-//  cv::imshow("image", src_img); 
-//  cv::waitKey(-1);
-
   cv::Mat left(frame_height, frame_width, CV_8UC1); 
   cv::Mat right(frame_height, frame_width, CV_8UC1);
 
@@ -51,6 +53,14 @@ int main(int argc, char** argv) {
         calib.undistortMaps[1].x, 
         calib.undistortMaps[1].y, 
         cv::INTER_LINEAR);
+
+  std::cout << left.size() << std::endl;
+
+//  cv::imshow("image", src_img); 
+//  cv::imshow("left", left);
+//  cv::imshow("right", right);
+//  cv::waitKey(-1);
+
 
   std::vector<cv::Point2f> left_corners, right_corners;
 
@@ -77,6 +87,7 @@ int main(int argc, char** argv) {
   assert(left_corners.size() == right_corners.size());
 
   for (int i=0; i < left_corners.size(); ++i) {
+    std::cout << left_corners[i].y - right_corners[i].y << std::endl;
     points.push_back(
         cv::Point3d(
             left_corners[i].x, 

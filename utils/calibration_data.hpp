@@ -16,6 +16,8 @@ struct RawCalibrationData {
   static RawCalibrationData read(
       const std::string& filename);
 
+  void write(const std::string& filename);
+
   cv::Size size;
   cv::Mat Ml, dl, Mr, dr;
   cv::Mat R, T;
@@ -26,7 +28,8 @@ struct CalibrationData {
 
   UndistortMaps undistortMaps[2];
   StereoIntrinsics intrinsics;
-  cv::Mat Q;
+  cv::Mat Rl, Rr, Pl, Pr, Q;
+  RawCalibrationData raw;
 
  private:
   CalibrationData() {}
