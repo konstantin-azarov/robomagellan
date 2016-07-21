@@ -1,4 +1,4 @@
-COPTS = ["-g"]
+COPTS = []
 LINKOPTS = []
 
 cc_library(
@@ -148,6 +148,7 @@ cc_binary(
     name="calibrate",
     srcs=["calibrate.cc"],
     deps=[
+        ":backward",
         ":utils_lib", 
         ":calibration_data_lib",
         "@opencv3//:opencv2",
@@ -156,4 +157,5 @@ cc_binary(
     linkopts=LINKOPTS + [
       "-lboost_system", 
       "-lboost_program_options", 
-      "-lboost_filesystem"])
+      "-lboost_filesystem",
+      "-ldw"])

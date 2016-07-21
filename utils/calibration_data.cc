@@ -13,7 +13,11 @@ RawCalibrationData RawCalibrationData::read(const std::string& filename) {
   fs["dl"] >> res.dl;
   fs["Mr"] >> res.Mr;
   fs["dr"] >> res.dr;
-  fs["R"] >> res.R;
+
+  cv::Mat om;
+  fs["om"] >> om;
+  cv::Rodrigues(om, res.R);
+
   fs["T"] >> res.T;
 
   return res;
@@ -27,7 +31,11 @@ void RawCalibrationData::write(const std::string& filename) {
   cv::write(fs, "dl", dl);
   cv::write(fs, "Mr", Mr);
   cv::write(fs, "dr", dr);
-  cv::write(fs, "R", R);
+
+  cv::Mat om;
+  cv::Rodrigues(R, om);
+  cv::write(fs, "om", om);
+
   cv::write(fs, "T", T);
 }
 

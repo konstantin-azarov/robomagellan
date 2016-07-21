@@ -120,3 +120,38 @@ double descriptorDist(const cv::Mat& a, const cv::Mat& b) {
 //
 //  return cv::norm(a, b);
 }
+
+cv::Mat hconcat(const cv::Mat& l, const cv::Mat& r) {
+  cv::Mat res;
+  cv::hconcat(l, r, res);
+  return res;
+}
+
+cv::Mat leastSquares(const cv::Mat& x, const cv::Mat& y) {
+  return (x.t()*x).inv()*x.t()*y;
+}
+
+cv::Vec3d fitLine(const cv::Mat& pts) {
+  assert(pts.cols == 2 && pts.channels() == 1);
+
+  int n = pts.rows;
+
+  auto x = hconcat(pts.col(0), cv::Mat::ones(n, 1, pts.type()));
+  auto y = pts.col(1);
+
+  cv::Mat_<double> params = leastSquares(x, y);
+
+  double a = params(0, 0);
+  double b = -1;
+  double c = params(0, 1);
+  double d = sqrt(a*a + b*b);
+
+  return cv::Vec3d(a/d, b/d, c/d);
+}
+
+cv::Point2d intresectLines(const cv::Mat& lines) {
+  assert(pts.cols == 3 && pts.channels() == 1);
+
+  
+}
+

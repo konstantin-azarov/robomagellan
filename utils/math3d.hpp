@@ -30,4 +30,13 @@ double norm3(const cv::Point3d& pt);
 
 double descriptorDist(const cv::Mat& a, const cv::Mat& b);
 
+cv::Mat hconcat(const cv::Mat& l, const cv::Mat& r);
+
+cv::Mat leastSquares(const cv::Mat& x, const cv::Mat& y);
+
+cv::Vec3d fitLine(const cv::Mat& pts);
+
+cv::Point2d intresectLines(const cv::Mat& lines);
+
+
 #endif
