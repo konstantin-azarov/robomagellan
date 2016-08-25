@@ -10,6 +10,8 @@
 
 #include "calibration_data.hpp"
 
+#include "math3d.hpp"
+
 namespace fs = boost::filesystem;
 namespace po = boost::program_options;
 
@@ -265,12 +267,12 @@ bool calibrateStereo(
 //    cv::waitKey(-1);
 
 
-    std::cout << i << ": " 
-        << tmp << ", " << cv::norm(tmp) << ", " << t
+//    std::cout << i << ": " 
+//        << tmp << ", " << cv::norm(tmp) << ", " << t
 //      << resL << ", " << leftR << ", " << leftT
 //      << resR << ", " << rightR << ", " << rightT
-        << residual 
-      << std::endl;
+//        << residual 
+//      << std::endl;
   }
 
   cv::Mat E, F;
@@ -287,8 +289,8 @@ bool calibrateStereo(
   cv::Mat tmp;
   cv::Rodrigues(R, tmp);
 
-  std::cout << tmp << std::endl;
-  std::cout << T << std::endl;
+  std::cout << "R = " << tmp << std::endl;
+  std::cout << "T = " << T << std::endl;
   std::cout << "Stereo calibration residual: " << residual << std::endl;
 
 
@@ -296,39 +298,7 @@ bool calibrateStereo(
   return true;
 }
 
-cv::Mat hconcat(const cv::Mat& l, const cv::Mat& r) {
-  cv::Mat res;
-  cv::hconcat(l, r, res);
-  return res;
-}
-
-cv::Mat leastSquares(const cv::Mat& x, const cv::Mat& y) {
-  return (x.t()*x).inv()*x.t()*y;
-}
-
-cv::Vec3d fitLine(const cv::Mat& pts) {
-  assert(pts.cols == 2 && pts.channels() == 1);
-
-  int n = pts.rows;
-
-  auto x = hconcat(pts.col(0), cv::Mat::ones(n, 1, pts.type()));
-  auto y = pts.col(1);
-
-  cv::Mat_<double> params = leastSquares(x, y);
-
-  double a = params(0, 0);
-  double b = -1;
-  double c = params(0, 1);
-  double d = sqrt(a*a + b*b);
-
-  return cv::Vec3d(a/d, b/d, c/d);
-}
-
-cv::Point2d intresectLines(const cv::Mat& lines) {
-  assert(pts.cols == 3 && pts.channels() == 1);
-}
-
-cv::Point2d findVanishingPoint(
+cv::Vec2d findVanishingPoint(
     cv::InputArray corners_, 
     int chessboard_width,
     cv::Mat* dbg_img) {
@@ -355,7 +325,41 @@ cv::Point2d findVanishingPoint(
     }
   }
 
-  std::cout << lines << std::endl;
+//  std::cout << lines << std::endl;
+
+  return intersectLines(lines);
+}
+
+std::pair<cv::Vec2d, cv::Vec2d> findVanishingPoints(
+  std::vector<cv::Point2f> corners,
+  int chessboard_width,
+  cv::Mat* dbg_img) {
+  
+  auto horizontal = findVanishingPoint(corners, chessboard_width, dbg_img);
+  int chessboard_height = corners.size() / chessboard_width;
+
+  std::vector<cv::Point2f> transposed;
+  for (int j = 0; j < chessboard_width; ++j) {
+    for (int i = 0; i < chessboard_height; ++i) {
+      transposed.push_back(corners[i*chessboard_width + j]);
+    }
+  }
+
+  auto vertical = findVanishingPoint(transposed, chessboard_height, dbg_img);
+
+  return std::make_pair(horizontal, vertical);
+}
+
+cv::Vec3d normalizePoint(const cv::Vec2d& p, const cv::Mat_<double>& m) {
+  return cv::Vec3d((p[0] - m[0][2])/m[0][0], (p[1] - m[1][2])/m[1][1], 1.0);
+}
+
+std::pair<cv::Vec3d, cv::Vec3d> normalizePoints(
+    const std::pair<cv::Vec2d, cv::Vec2d>& points,
+    const cv::Mat_<double>& m) {
+  return std::make_pair(
+      normalizePoint(points.first, m),
+      normalizePoint(points.second, m));
 }
 
 backward::SignalHandling sh;
@@ -476,8 +480,24 @@ int main(int argc, char** argv) {
       drawCross(dbg_right, right[j], cv::Scalar(0, 0, 255));
     }
 
-    findVanishingPoint(left, chessboard_size.width, &dbg_left);
-    findVanishingPoint(right, chessboard_size.width, &dbg_right);
+    auto points_left = 
+      findVanishingPoints(left, chessboard_size.width, &dbg_left);
+    auto points_right = 
+      findVanishingPoints(right, chessboard_size.width, &dbg_right);
+
+    auto points_left_n = normalizePoints(points_left, raw_calib.Ml);
+    auto points_right_n = normalizePoints(points_right, raw_calib.Mr);
+
+    std::cout << points_left_n.first.t() * points_left_n.second << std::endl;
+    std::cout << points_right_n.first.t() * points_right_n.second << std::endl;
+
+    std::cout 
+      << "left = " << points_left.first << ", " << points_left.second 
+      << "; right = " << points_right.first  << ", " << points_right.second
+      << "; d = " << points_left.first - points_right.first << ", " 
+      << points_left.second - points_right.second
+      << std::endl;
+
 
     cv::imshow("debug", dbg_img);
     cv::waitKey(-1);

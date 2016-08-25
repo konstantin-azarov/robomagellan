@@ -149,9 +149,19 @@ cv::Vec3d fitLine(const cv::Mat& pts) {
   return cv::Vec3d(a/d, b/d, c/d);
 }
 
-cv::Point2d intresectLines(const cv::Mat& lines) {
-  assert(pts.cols == 3 && pts.channels() == 1);
+cv::Vec2d intersectLines(const cv::Mat& lines) {
+  assert(lines.cols == 3 && lines.channels() == 1);
 
-  
+  cv::Mat_<double> a(2, 3);
+
+  for (int i=0; i < 2; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      a(i, j) = cv::Mat_<double>(lines.col(i).t() * lines.col(j))(0, 0);
+    }
+  }
+
+  cv::Mat_<double> r = -a.colRange(0, 2).inv()*a.col(2);
+
+  return cv::Vec2d(r(0, 0), r(1, 0));
 }
 

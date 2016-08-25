@@ -72,6 +72,12 @@ cc_library(
     copts=COPTS,
     deps=[":calibration_data_lib", "@opencv3//:opencv2"])
 
+cc_test(
+    name="math3d_test",
+    srcs=["math3d_test.cc"],
+    copts=COPTS,
+    deps=[":math3d_lib", ":catch"])
+
 cc_library(
     name="reprojection_estimator_lib",
     srcs=["reprojection_estimator.cc"],
@@ -149,6 +155,7 @@ cc_binary(
     srcs=["calibrate.cc"],
     deps=[
         ":backward",
+        ":math3d_lib",
         ":utils_lib", 
         ":calibration_data_lib",
         "@opencv3//:opencv2",

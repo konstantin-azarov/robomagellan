@@ -36,7 +36,7 @@ cv::Mat leastSquares(const cv::Mat& x, const cv::Mat& y);
 
 cv::Vec3d fitLine(const cv::Mat& pts);
 
-cv::Point2d intresectLines(const cv::Mat& lines);
+cv::Vec2d intersectLines(const cv::Mat& lines);
 
 
 #endif
