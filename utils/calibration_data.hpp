@@ -12,6 +12,14 @@ struct UndistortMaps {
   cv::Mat x, y;
 };
 
+struct CameraCalibrationData {
+  cv::Mat M, d;
+};
+
+struct StereoCalibrationData {
+  cv::Mat R, T;
+}
+
 struct RawCalibrationData {
   static RawCalibrationData read(
       const std::string& filename);
@@ -19,8 +27,8 @@ struct RawCalibrationData {
   void write(const std::string& filename);
 
   cv::Size size;
-  cv::Mat Ml, dl, Mr, dr;
-  cv::Mat R, T;
+  CameraCalibrationData left, right;
+  StereoCalibrationData stereo;
 };
 
 struct CalibrationData {
