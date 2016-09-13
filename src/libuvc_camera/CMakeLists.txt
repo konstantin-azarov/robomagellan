@@ -19,6 +19,8 @@ catkin_package(
   LIBRARIES libuvc_camera_nodelet
   )
 
+include_directories("/usr/include/libusb-1.0")
+
 include_directories(include ${libuvc_INCLUDE_DIRS} ${Boost_INCLUDE_DIR} ${catkin_INCLUDE_DIRS})
 link_directories(${catkin_LINK_DIRS})
 

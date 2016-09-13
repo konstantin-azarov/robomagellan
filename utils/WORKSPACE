@@ -1,6 +1,6 @@
 new_local_repository(
     name="opencv3",
-    path="/usr/local/opencv3",
+    path="/usr/local",
     build_file="opencv3.BUILD")
 
 new_local_repository(
