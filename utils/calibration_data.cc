@@ -9,16 +9,16 @@ RawCalibrationData RawCalibrationData::read(const std::string& filename) {
   cv::FileStorage fs(filename, cv::FileStorage::READ);
 
   fs["size"] >> res.size;
-  fs["Ml"] >> res.left.M;
-  fs["dl"] >> res.left.d;
-  fs["Mr"] >> res.right.M;
-  fs["dr"] >> res.right.d;
+  fs["Ml"] >> res.Ml;
+  fs["dl"] >> res.dl;
+  fs["Mr"] >> res.Mr;
+  fs["dr"] >> res.dr;
 
   cv::Mat om;
   fs["om"] >> om;
-  cv::Rodrigues(om, res.stereo.R);
+  cv::Rodrigues(om, res.R);
 
-  fs["T"] >> res.stereo.T;
+  fs["T"] >> res.T;
 
   return res;
 }
@@ -27,26 +27,26 @@ void RawCalibrationData::write(const std::string& filename) {
   cv::FileStorage fs(filename, cv::FileStorage::WRITE);
 
   cv::write(fs, "size", size);
-  cv::write(fs, "Ml", left.M);
-  cv::write(fs, "dl", left.d);
-  cv::write(fs, "Mr", right.M);
-  cv::write(fs, "dr", right.d);
+  cv::write(fs, "Ml", Ml);
+  cv::write(fs, "dl", dl);
+  cv::write(fs, "Mr", Mr);
+  cv::write(fs, "dr", dr);
 
   cv::Mat om;
-  cv::Rodrigues(stereo.R, om);
+  cv::Rodrigues(R, om);
   cv::write(fs, "om", om);
 
-  cv::write(fs, "T", stereo.T);
+  cv::write(fs, "T", T);
 }
 
 CalibrationData::CalibrationData(const RawCalibrationData& raw) {
   this->raw = raw;
 
   cv::stereoRectify(
-      raw.left.M, raw.left.d, 
-      raw.right.M, raw.right.d, 
+      raw.Ml, raw.dl, 
+      raw.Mr, raw.dr, 
       raw.size,
-      raw.stereo.R, raw.stereo.T,
+      raw.R, raw.T,
       Rl, Rr,
       Pl, Pr,
       Q,
@@ -54,13 +54,13 @@ CalibrationData::CalibrationData(const RawCalibrationData& raw) {
       0); 
 
   cv::initUndistortRectifyMap(
-      raw.left.M, raw.left.d, Rl, Pl, 
+      raw.Ml, raw.dl, Rl, Pl, 
       raw.size,
       CV_32FC1,
       undistortMaps[0].x, undistortMaps[0].y);
 
   cv::initUndistortRectifyMap(
-      raw.right.M, raw.right.d, Rr, Pr, 
+      raw.Mr, raw.dr, Rr, Pr, 
       raw.size, 
       CV_32FC1,
       undistortMaps[1].x, undistortMaps[1].y);

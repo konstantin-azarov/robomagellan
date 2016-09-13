@@ -10,8 +10,8 @@ using namespace std;
 #define HWREV 0x5102
 #define FWREV 0x01bf
 
-#define VENDOR_ID 0x2a0b
-#define PRODUCT_ID 0x00f5
+#define VENDOR_ID 0x2b03//0x2a0b
+#define PRODUCT_ID 0xf580//0x00f5
 
 #define CAMERA_DEBUG
 
@@ -31,7 +31,7 @@ bool Camera::init(int width, int height, int fps) {
   frame_counter_ = 0;
   tmp_buffer_ = new uint8_t[width*height*2];
 
-  queue_ = new FrameBufferQueue(width*height*2, 60*10);
+  queue_ = new FrameBufferQueue(width*height*2, 30*10);
 
   uvc_stream_ctrl_t ctrl;
   uvc_error_t res;
@@ -79,19 +79,19 @@ bool Camera::init(int width, int height, int fps) {
   }
 #endif
 
-  uint8_t unitId = 3;
-  uint8_t ctl = 0x07;
-  uint8_t buf[36 + 4 + 9];
-
-  uint8_t ret = uvc_get_ctrl(devh_, unitId, ctl, buf, sizeof(buf), UVC_GET_CUR);
-
-  uint16_t hw_rev = buf[0] | ((uint16_t)buf[1] << 8);
-  uint16_t fw_rev = buf[0] | buf[2] | ((uint16_t)buf[3] << 8);
-
-  if (hw_rev != HWREV && fw_rev != FWREV) {
-    cerr << "Does not seem to be the right camera" << endl;
-    return false;
-  }
+//  uint8_t unitId = 3;
+//  uint8_t ctl = 0x07;
+//  uint8_t buf[36 + 4 + 9];
+//
+//  uint8_t ret = uvc_get_ctrl(devh_, unitId, ctl, buf, sizeof(buf), UVC_GET_CUR);
+//
+//  uint16_t hw_rev = buf[0] | ((uint16_t)buf[1] << 8);
+//  uint16_t fw_rev = buf[0] | buf[2] | ((uint16_t)buf[3] << 8);
+//
+//  if (hw_rev != HWREV || fw_rev != FWREV) {
+//    cerr << "Does not seem to be the right camera" << hw_rev << " " << fw_rev << endl;
+//    return false;
+//  }
 
   /* Try to negotiate a 640x480 30 fps YUYV stream profile */
   res = uvc_get_stream_ctrl_format_size(
@@ -178,23 +178,23 @@ void Camera::callback(uvc_frame_t* frame) {
   uint8_t* right_data = tmp_buffer_ + frame_width_;
 
   frame_counter_++;
-  if (frame_counter_ % 2 == 0) {
-    return;
-  }
+//  if (frame_counter_ % 2 == 0) {
+//    return;
+//  }
 
   if (frame->data_bytes != frame_width_*frame_height_*2) {
     cerr << "Incomplete frame: " << frame->sequence << " " << frame->data_bytes << endl;
     return;
   }
 
-  for (int i = 0; i < frame_height_; ++i) {
-    for (int j = 0; j < frame_width_; ++j) {
-      *(left_data++) = *(data++);
-      *(right_data++) = *(data++);
-    }
-    left_data += frame_width_;
-    right_data += frame_width_;
-  }
+//  for (int i = 0; i < frame_height_; ++i) {
+//    for (int j = 0; j < frame_width_; ++j) {
+//      *(left_data++) = *(data++);
+//      *(right_data++) = *(data++);
+//    }
+//    left_data += frame_width_;
+//    right_data += frame_width_;
+//  }
 
 
   if (frame_counter_ != frame->sequence) {
@@ -203,5 +203,5 @@ void Camera::callback(uvc_frame_t* frame) {
     frame_counter_ = frame->sequence;
   }
 
-  queue_->addFrame(tmp_buffer_);
+  queue_->addFrame(data);
 }

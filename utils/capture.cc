@@ -10,27 +10,21 @@
 #include "camera.hpp"
 #include "utils.hpp"
 
+#define BACKWARD_HAS_DW 1
+#include "backward.hpp"
+
 using namespace std;
 using boost::format;
 using boost::str;
 
 namespace po = boost::program_options;
 
-const int FRAME_WIDTH = 640;
-const int FRAME_HEIGHT = 480;
+const int FRAME_WIDTH = 1280;
+const int FRAME_HEIGHT = 720;
 const int FRAME_SIZE = FRAME_WIDTH*FRAME_HEIGHT;
-const int FPS = 60;
+const int FPS = 30;
 
-void uncombine(const uint8_t* data, uint8_t* left_data, uint8_t* right_data) {
-  for (int i=0; i < FRAME_HEIGHT; ++i) {
-    for (int j=0; j < FRAME_WIDTH; ++j) {
-      *(left_data++) = *data;
-      *(right_data++) = *(data + FRAME_WIDTH);
-      data++;
-    }
-    data += FRAME_WIDTH;
-  }
-}
+backward::SignalHandling sh;
 
 void fail(const char* msg) {
   cerr << msg << endl;
@@ -74,10 +68,12 @@ FILE* open_video_sink(string video_format, string output_file) {
 }
 
 void close_video_sink(string video_format, FILE* video_sink) {
-  if (video_format == "x264"){
-    pclose(video_sink);
-  } else {
-    fclose(video_sink);
+  if (video_sink != nullptr) {
+    if (video_format == "x264"){
+      pclose(video_sink);
+    } else {
+      fclose(video_sink);
+    }
   }
 }
 
@@ -121,7 +117,7 @@ int main(int argc, char **argv) {
   }
 
   Camera camera;
-  if (!camera.init(FRAME_WIDTH, FRAME_HEIGHT, FPS)) {
+  if (!camera.init(FRAME_WIDTH*2, FRAME_HEIGHT, FPS)) {
     fail("Failed to initialize camera");
   }
 
@@ -147,10 +143,11 @@ int main(int argc, char **argv) {
        << endl;
   cout << "Ready" << endl;
 
-  uint8_t buffer[FRAME_SIZE*2];
+  uint8_t buffer[FRAME_SIZE*4];
 
-  cv::Mat combined(FRAME_HEIGHT, FRAME_WIDTH*2, CV_8UC1, buffer);
-
+  cv::Mat raw(FRAME_HEIGHT, FRAME_WIDTH*2, CV_8UC2, buffer);
+  cv::Mat combined(FRAME_HEIGHT, FRAME_WIDTH*2, CV_8UC3);
+  cv::Mat preview;
 
   int current_snapshot_index = 0;
   bool done = false;
@@ -160,10 +157,14 @@ int main(int argc, char **argv) {
   int fps_frame_count = 0;
   while(!done) {
     camera.nextFrame(buffer);
+
+    cv::cvtColor(raw, combined, CV_YUV2RGB_YVYU);
+
     frame_count++;
 
 #ifndef NO_PREVIEW
-    cv::imshow("preview", combined);
+    cv::resize(combined, preview, cv::Size(0, 0), 0.5, 0.5);
+    cv::imshow("preview", preview);
 #endif
 
     if (video_sink != nullptr) {

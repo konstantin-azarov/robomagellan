@@ -10,8 +10,8 @@
 
 namespace po = boost::program_options;
 
-const int frame_width = 640;
-const int frame_height = 480;
+const int frame_width = 1280;
+const int frame_height = 720;
 
 backward::SignalHandling sh;
 
@@ -61,6 +61,13 @@ int main(int argc, char** argv) {
 //  cv::imshow("right", right);
 //  cv::waitKey(-1);
 
+  cv::Mat debug_img(frame_height, frame_width*2, CV_8UC3);
+  auto dbg_left = debug_img.colRange(0, frame_width);
+  auto dbg_right = debug_img.colRange(frame_width, frame_width*2);
+  cv::cvtColor(left, dbg_left, CV_GRAY2RGB);
+  cv::cvtColor(right, dbg_right, CV_GRAY2RGB);
+
+//  cv::imshow("rectified", debug_img); cv::waitKey(-1);
 
   std::vector<cv::Point2f> left_corners, right_corners;
 
@@ -72,12 +79,6 @@ int main(int argc, char** argv) {
     std::cout << "Right corners not found" << std::endl;
     return 0;
   }
-
-  cv::Mat debug_img(frame_height, frame_width*2, CV_8UC3);
-  auto dbg_left = debug_img.colRange(0, frame_width);
-  auto dbg_right = debug_img.colRange(frame_width, frame_width*2);
-  cv::cvtColor(left, dbg_left, CV_GRAY2RGB);
-  cv::cvtColor(right, dbg_right, CV_GRAY2RGB);
 
   cv::drawChessboardCorners(dbg_left, cv::Size(7, 5), left_corners, true);
   cv::drawChessboardCorners(dbg_right, cv::Size(7, 5), right_corners, true);
@@ -107,10 +108,13 @@ int main(int argc, char** argv) {
     y(i, 0) = points[i].z;
   }
 
-  auto plane = (x.t()*x).inv()*x.t()*y;
+  cv::Mat_<double> plane = (x.t()*x).inv()*x.t()*y;
+  double s = sqrt(plane(0, 0)*plane(0, 0) + plane(1, 0)*plane(1, 0) + 1);
+  double d = plane(2, 0)/s;
   std::cout << plane << std::endl;
+  std::cout << d << std::endl;
 
-  cv::namedWindow("image");
-  cv::imshow("image", debug_img); 
-  cv::waitKey(-1);
+//  cv::namedWindow("image");
+//  cv::imshow("image", debug_img); 
+//  cv::waitKey(-1);
 }

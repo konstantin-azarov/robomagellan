@@ -136,9 +136,9 @@ cc_binary(
           "frame_buffer_queue.cc",
           "camera.hpp",
           "camera.cc"],
-    deps=[":utils_lib", "@opencv3//:opencv2", "@local//:uvc"],
+    deps=[":utils_lib", "@opencv3//:opencv2", "@local//:uvc", ":backward"],
     copts=COPTS,
-    linkopts=LINKOPTS + ["-lboost_program_options"])
+    linkopts=LINKOPTS + ["-lboost_program_options", "-ldw"])
 
 cc_binary(
     name="distance",
