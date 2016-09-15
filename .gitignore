@@ -2,6 +2,7 @@
 /devel
 
 utils/video
+utils/snapshots
 
 *.pyc
 .*.swp
