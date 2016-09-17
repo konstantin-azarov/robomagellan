@@ -79,7 +79,15 @@ link_directories(${OpenCV_LIBRARY_DIRS})
 
 ###############################################################################
 # EXECUTABLE
-add_definitions(-std=c++11)# -m64) #-Wall)
+add_definitions(-std=c++11 -msse3)# -m64) #-Wall)
+
+file(GLOB LIBVISO_SRC_FILES src/libviso/*.cpp)
+
+include_directories(src/libviso)
+
+add_library(libviso ${LIBVISO_SRC_FILES})
+
+target_link_libraries(libviso)
 
 add_executable(
   process
@@ -104,6 +112,22 @@ target_link_libraries(
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
   ${CERES_LIBRARIES}
+)
+
+add_executable(
+  process_viso
+  src/process_viso.cc
+  src/calibration_data.cc
+  src/bag_video_reader.cc
+)
+
+target_link_libraries(
+  process_viso
+  libviso
+  png
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBS}
+  gflags
 )
 
 add_executable(
@@ -133,6 +157,16 @@ target_link_libraries(
   ${ZED_LIBRARIES}
 )
 
+add_executable(
+  zed_test
+  src/zed_test.cc)
+
+target_link_libraries(
+  zed_test
+  ${OpenCV_LIBS}
+  ${catkin_LIBRARIES}
+  ${ZED_LIBRARIES}
+)
 ###############################################################################
 
 #Add all files in subdirectories of the project in

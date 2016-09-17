@@ -101,10 +101,6 @@ void CrossFrameProcessor::match(
     double best_dist = 1E+15;
     auto left_descs = p1.pointDescriptors(i);
 
-//    if (i == 326) {
-//      std::cout << "Matching 326" << std::endl;
-//    }
-//
     for (int j = 0; j < points2.size(); ++j) {
       auto right_descs = p2.pointDescriptors(j);
 
@@ -112,10 +108,6 @@ void CrossFrameProcessor::match(
       double d2 = descriptorDist(left_descs.second, right_descs.second);
 
       double d = std::max(d1, d2);
-
-//      if (i == 326) {
-//        std::cout << j << "=" << d << std::endl;
-//      }
 
       if (d < best_dist) {
         best_dist = d;

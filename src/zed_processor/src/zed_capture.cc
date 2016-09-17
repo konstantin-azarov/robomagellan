@@ -49,45 +49,37 @@ int main(int argc, char** argv) {
 
   bool done = false;
   while (!done) {
-    auto t0 = ros::Time::now();
+    /* auto t0 = ros::Time::now(); */
 
     int err = camera.grab(zed::STANDARD, false, false, false);
-    if (err != 0) {
-      ROS_ERROR_STREAM("grab error: " << err);
-    }
+    if (!err) {
+      auto raw_left = camera.retrieveImage(zed::SIDE::LEFT_UNRECTIFIED);
+      auto raw_right = camera.retrieveImage(zed::SIDE::RIGHT_UNRECTIFIED);
 
-    auto t1 = ros::Time::now();
-
-    auto raw_left = camera.retrieveImage(zed::SIDE::LEFT);
-    auto raw_right = camera.retrieveImage(zed::SIDE::RIGHT);
-
-    cv::cvtColor(
-        zed::slMat2cvMat(raw_left),
-        left_img, 
-        CV_RGBA2RGB);
-    cv::cvtColor(
-        zed::slMat2cvMat(raw_right),
-        right_img,
-        CV_RGBA2RGB);
+      cv::cvtColor(
+          zed::slMat2cvMat(raw_left),
+          left_img, 
+          CV_RGBA2RGB);
+      cv::cvtColor(
+          zed::slMat2cvMat(raw_right),
+          right_img,
+          CV_RGBA2RGB);
    
-    auto t2 = ros::Time::now();
 
-    ROS_INFO_STREAM("dt: " << (t1 - t0) << " " << (t2 - t1));
+      cv::imshow("preview", combined_image);
 
-    cv::imshow("left", left_img);
-    cv::imshow("right", right_img);
+      int key = cv::waitKey(1);
+      if (key != -1) {
+        key &= 0xFF;
+      }
 
-    int key = cv::waitKey(1);
-    if (key != -1) {
-      key &= 0xFF;
-    }
-
-    switch (key) {
-      case 27:
-        done = true;
-        break;
-      case 'e':
-        ROS_INFO_STREAM("Exposure: " << camera.getCameraSettingsValue(zed::ZED_EXPOSURE));
+      switch (key) {
+        case 27:
+          done = true;
+          break;
+        case 'e':
+          ROS_INFO_STREAM("Exposure: " << camera.getCameraSettingsValue(zed::ZED_EXPOSURE));
+      }
     }
 
     if (!loop_rate.sleep()) {

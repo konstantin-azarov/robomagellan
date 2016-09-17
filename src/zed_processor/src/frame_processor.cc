@@ -1,3 +1,5 @@
+#include <chrono>
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
@@ -5,7 +7,6 @@
 #include "calibration_data.hpp"
 #include "frame_processor.hpp"
 #include "math3d.hpp"
-#include "utils.hpp" 
 
 struct Match {
   int leftIndex, rightIndex;
@@ -23,15 +24,14 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
         calib_->undistortMaps[i].y, 
         cv::INTER_LINEAR);
 
-//    auto detector = cv::BRISK::create(threshold);
+    auto detector = cv::AGAST::create(threshold);
     auto extractor = cv::xfeatures2d::FREAK::create();
-    auto detector = cv::xfeatures2d::SURF::create();
-//    auto extractor = detector;
-    double t0 = nanoTime();
+//    auto detector = cv::xfeatures2d::SURF::create();
+    auto t0 = std::chrono::high_resolution_clock::now();
     detector->detect(undistorted_image_[i], keypoints_[i]);
+    auto t1 = std::chrono::high_resolution_clock::now();
     extractor->compute(undistorted_image_[i], keypoints_[i], descriptors_[i]);
-    double t1 = nanoTime();
-    std::cout << "dT = " << t1 - t0 << std::endl;
+    auto t2 = std::chrono::high_resolution_clock::now();
 
     order_[i].resize(keypoints_[i].size());
     for (int j=0; j < order_[i].size(); ++j) {
@@ -44,8 +44,18 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
 
         return (k1.y < k2.y || (k1.y == k2.y && k1.x < k2.x));
     });
+
+    auto t3 = std::chrono::high_resolution_clock::now();
+    std::cout 
+      << " kp = " << keypoints_[i].size()
+      << " detect = " << std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() 
+      << " extract = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() 
+      << " sort = " << std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
   }
 
+
+
+  auto t0 = std::chrono::high_resolution_clock::now();
   for (int i=0; i < 2; ++i) {
     int j = 1 - i;
     match(
@@ -54,6 +64,7 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
         i ? -1 : 1,
         matches_[i]);
   }
+  auto t1 = std::chrono::high_resolution_clock::now();
 
   points_.resize(0);
   point_keypoints_.resize(0);
@@ -64,16 +75,25 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
     if (j != -1 && matches_[1][j] == i) {
       auto& kp1 = keypoints_[0][i].pt;
       auto& kp2 = keypoints_[1][j].pt;
-      points_.push_back(
-          cv::Point3d(kp1.x, (kp1.y + kp2.y)/2, std::max(0.0f, kp1.x - kp2.x)));
-      point_keypoints_.push_back(i);
-      match_points_[i] = points_.size() - 1;
+
+      if (kp1.x - kp2.x > 0) {
+        points_.push_back(
+            cv::Point3d(kp1.x, (kp1.y + kp2.y)/2, std::max(0.0f, kp1.x - kp2.x)));
+        point_keypoints_.push_back(i);
+        match_points_[i] = points_.size() - 1;
+      }
     }
   }
 
   if (points_.size() > 0) {
     cv::perspectiveTransform(points_, points_, calib_->Q);
   }
+
+  auto t2 = std::chrono::high_resolution_clock::now();
+  std::cout 
+    << " match = " << std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() 
+    << " transform = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() 
+    << std::endl;
 }
 
 void FrameProcessor::match(const std::vector<cv::KeyPoint>& kps1,
@@ -112,7 +132,7 @@ void FrameProcessor::match(const std::vector<cv::KeyPoint>& kps1,
 
       double dx = inv*(pt1.x - pt2.x);
 
-      if (dx > 3 && dx < 100) {
+      if (dx > -100 && dx < 100) {
         double dist = descriptorDist(desc1.row(i), desc2.row(j));
         if (dist < best_d) {
           best_d = dist;

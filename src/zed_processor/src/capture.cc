@@ -22,7 +22,7 @@ namespace po = boost::program_options;
 const int FRAME_WIDTH = 1280;
 const int FRAME_HEIGHT = 720;
 const int FRAME_SIZE = FRAME_WIDTH*FRAME_HEIGHT;
-const int FPS = 30;
+const int FPS = 60;
 
 backward::SignalHandling sh;
 
@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
       last_timestamp = t;
       fps_frame_count = 0;
 
-      cout << "Exposure: " << camera.getExposure() << endl;
+    //  cout << "Exposure: " << camera.getExposure() << endl;
 //      cout << "Gain: " << camera.getGain() << endl;
     }
 

@@ -67,6 +67,8 @@ int main(int argc, char** argv) {
   int frame_width = calib.raw.size.width;
   int frame_height = calib.raw.size.height;
 
+  double scale_factor = 1.0/1.6;
+
   BagVideoReader rdr(video_file, "/image_raw");
   cv::Mat frame_mat(frame_height, frame_width*2, CV_8UC1);
   cv::Mat mono_frames[] = {
@@ -94,7 +96,7 @@ int main(int argc, char** argv) {
     bool done = false;
     bool show_features = false;
     bool show_matches = false;
-    int threshold = 50;
+    int threshold = 60;
 
     while (!done) {
       processor.process(mono_frames, threshold);

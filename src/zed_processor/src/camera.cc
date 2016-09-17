@@ -118,12 +118,12 @@ bool Camera::init(int width, int height, int fps) {
     return false;
   }
 
-  std::cout << "SetAE = " << uvc_strerror(uvc_set_ae_mode(devh_, 4)) << std::endl; /* e.g., turn on auto exposure */
-  std::cout << "SetAEP = " << uvc_strerror(uvc_set_ae_priority(devh_, 0)) << std::endl;
+  /* std::cout << "SetAE = " << uvc_strerror(uvc_set_ae_mode(devh_, 2)) << std::endl; /1* e.g., turn on auto exposure *1/ */
+  /* std::cout << "SetAEP = " << uvc_strerror(uvc_set_ae_priority(devh_, 0)) << std::endl; */
   
-  uint8_t ae_mode;
-  auto err = uvc_get_ae_mode(devh_, &ae_mode, UVC_GET_CUR);
-  std::cout << "AE = " << err << " xcxc " << (int)ae_mode << std::endl;
+  /* uint8_t ae_mode; */
+  /* auto err = uvc_get_ae_mode(devh_, &ae_mode, UVC_GET_CUR); */
+  /* std::cout << "AE = " << err << " xcxc " << (int)ae_mode << std::endl; */
 
   return true;
 }

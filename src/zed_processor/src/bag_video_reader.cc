@@ -1,3 +1,5 @@
+#include <assert.h>
+
 #include <opencv2/imgproc.hpp>
 
 #include <rosbag/bag.h>
@@ -19,9 +21,13 @@ BagVideoReader::~BagVideoReader() {
 }
 
 void BagVideoReader::skip(int cnt) {
-  while (iterator_ != view_.end() && cnt > 0) {
-    iterator_++;
-    cnt--;
+  if (cnt > 0) {
+    while (iterator_ != view_.end() && cnt != 0) {
+      iterator_++;
+      cnt--;
+    }
+  } else {
+    assert(false);
   }
 }
 
