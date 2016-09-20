@@ -2,6 +2,7 @@
 #define __FRAME_PROCESSOR__HPP__
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/xfeatures2d.hpp>
 #include <vector>
 
 struct CalibrationData;
@@ -38,8 +39,7 @@ class FrameProcessor {
       return std::make_pair(descriptors_[0].row(i), descriptors_[1].row(j));
     }
 
-
-    const std::vector<int> pointKeypoints() const { return point_keypoints_; }
+    const std::vector<int>& pointKeypoints() const { return point_keypoints_; }
     const std::vector<cv::KeyPoint>& keypoints(int t) const  { return keypoints_[t]; }
     const std::vector<int>& matches(int t) const { return matches_[t]; }
     
@@ -56,6 +56,8 @@ class FrameProcessor {
   private:
     const CalibrationData* calib_;
 
+    cv::Ptr<cv::xfeatures2d::FREAK> freak_;
+
     cv::Mat undistorted_image_[2];
 
     // [N]: a list of keypoints detected in the left and right image
@@ -69,7 +71,6 @@ class FrameProcessor {
     std::vector<int> matches_[2];             
     // points_[match_point_[i]] is extracted from keypoints_[0][i] and 
     // keypoints_[1][matches_[0][i]]
-    std::vector<int> match_points_;  
     std::vector<cv::Point3d> points_;
     // point[i] was extracted from keypoints_[0][point_keypoints_[i]]
     std::vector<int> point_keypoints_;

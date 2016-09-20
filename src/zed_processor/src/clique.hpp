@@ -10,7 +10,10 @@ class Clique {
 
     void reset(int n);
     void addEdge(int i, int j);
-    const std::vector<int>& clique();
+
+    const std::vector<int>& compute();
+
+    const std::vector<int>& clique() const { return clique_; }
 
   private:
     int edge_(int i, int j) { return i*n_ + j; }
@@ -21,7 +24,6 @@ class Clique {
     std::vector<int> clique_;
     std::vector<int> candidates_[2];
     int n_;
-    bool computed_;
 };
 
 #endif

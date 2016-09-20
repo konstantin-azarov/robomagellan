@@ -23,11 +23,13 @@ class ReprojectionEstimator {
 
     const cv::Mat& rot() const { return rot_; }
     const cv::Point3d& t() const { return t_; }
+    const cv::Mat& t_cov() const { return t_cov_; }
 
   private:
     const StereoIntrinsics* intrinsics_;
     cv::Mat rot_;
     cv::Point3d t_;
+    cv::Mat t_cov_;
 };
 
 #endif

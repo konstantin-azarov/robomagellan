@@ -79,7 +79,7 @@ link_directories(${OpenCV_LIBRARY_DIRS})
 
 ###############################################################################
 # EXECUTABLE
-add_definitions(-std=c++11 -msse3)# -m64) #-Wall)
+add_definitions(-std=c++11 -msse3 -g)# -m64) #-Wall)
 
 file(GLOB LIBVISO_SRC_FILES src/libviso/*.cpp)
 
@@ -88,6 +88,14 @@ include_directories(src/libviso)
 add_library(libviso ${LIBVISO_SRC_FILES})
 
 target_link_libraries(libviso)
+
+add_executable(
+  clique_test
+  src/test.cc) 
+
+target_link_libraries(
+  clique_test
+  ${OpenCV_LIBS})
 
 add_executable(
   process
@@ -107,6 +115,7 @@ add_executable(
 
 target_link_libraries(
   process
+  libdw.so
   ${catkin_LIBRARIES}
   ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY}
   ${OpenCV_LIBS}

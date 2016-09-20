@@ -9,6 +9,7 @@
 
 using ceres::AutoDiffCostFunction;
 using ceres::CostFunction;
+using ceres::Covariance;
 using ceres::Problem;
 using ceres::Solver;
 using ceres::QuaternionParameterization;
@@ -96,13 +97,13 @@ bool ReprojectionEstimator::estimate(
     problem.AddResidualBlock(
         new AutoDiffCostFunction<ForwardResidual, 4, 4, 3>(
           new ForwardResidual(f.r1, f.s2l, f.s2r, intrinsics_)),
-        nullptr,
+        new ceres::SoftLOneLoss(1.0),
         allParameterBlocks);
 
     problem.AddResidualBlock(
         new AutoDiffCostFunction<ReverseResidual, 4, 4, 3>(
           new ReverseResidual(f.r2, f.s1l, f.s1r, intrinsics_)),
-        nullptr,
+        new ceres::SoftLOneLoss(1.0),
         allParameterBlocks);
   }
 
@@ -111,6 +112,21 @@ bool ReprojectionEstimator::estimate(
   options.minimizer_progress_to_stdout = false;
   Solver::Summary summary;
   Solve(options, &problem, &summary);
+
+  std::vector<std::pair<const double*, const double*> > covariance_blocks;
+  covariance_blocks.push_back(std::make_pair(t, t));
+
+  t_cov_.create(3, 3, CV_64F);
+  
+  Covariance::Options cov_options;
+  Covariance covariance(cov_options);
+
+  if (covariance.Compute(covariance_blocks, &problem)) {
+    covariance.GetCovarianceBlock(t, t, reinterpret_cast<double*>(t_cov_.data));
+  } else {
+    t_cov_ = cv::Mat::zeros(3, 3, CV_64F);
+  }
+  
 
   rot_.create(3, 3, CV_64F);
   QuaternionToRotation(q, reinterpret_cast<double*>(rot_.data));

@@ -3,7 +3,6 @@
 #include "clique.hpp"
 
 void Clique::reset(int n) {
-  computed_ = false;
   n_ = n;
   graph_.resize(n*n);
   std::fill(graph_.begin(), graph_.end(), 0);
@@ -23,12 +22,7 @@ void Clique::addEdge(int i, int j) {
   }
 }
 
-const std::vector<int>& Clique::clique() {
-  if (computed_) {
-    return clique_;
-  }
-  computed_ = true;
-
+const std::vector<int>& Clique::compute() {
   assert(n_ > 0);
 
   clique_.resize(0);
