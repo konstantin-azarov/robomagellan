@@ -141,8 +141,10 @@ int main(int argc, char **argv) {
       << " cur = " << cur##name \
       << std::endl;
 
-  SHOW_PARAM(Gain);
-  SHOW_PARAM(Exposure);
+//  SHOW_PARAM(Gain);
+//  SHOW_PARAM(Exposure);
+//
+  int minExposure, maxExposure, curExposure;
 
   cout << "Ready" << endl;
 
@@ -223,13 +225,13 @@ int main(int argc, char **argv) {
       case '+':
         curExposure = min(maxExposure, curExposure + (key == '=' ? 50 : 1000));
         cout << "Exposure: cur = " << curExposure << endl;
-        camera.setExposure(curExposure);
+//        camera.setExposure(curExposure);
         break;
       case '-':
       case '_':
         curExposure = max(minExposure, curExposure - (key == '-' ? 50 : 1000));
         cout << "Exposure: cur = " << curExposure << endl;
-        camera.setExposure(curExposure);
+//        camera.setExposure(curExposure);
         break;
       case 226:
         break; // shift

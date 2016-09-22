@@ -153,10 +153,10 @@ bool Camera::init(int width, int height, int fps) {
     } \
   } 
 
-PARAM_ACCESSOR(uint32_t, Exposure, exposure_abs);
-PARAM_ACCESSOR(uint16_t, Iris, iris_abs);
-PARAM_ACCESSOR(uint16_t, Focus, focus_abs);
-PARAM_ACCESSOR(uint16_t, Gain, gain);
+//PARAM_ACCESSOR(uint32_t, Exposure, exposure_abs);
+//PARAM_ACCESSOR(uint16_t, Iris, iris_abs);
+//PARAM_ACCESSOR(uint16_t, Focus, focus_abs);
+//PARAM_ACCESSOR(uint16_t, Gain, gain);
 
 #undef PARAM_ACCESSOR
 
