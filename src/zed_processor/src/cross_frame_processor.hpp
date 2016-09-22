@@ -7,7 +7,7 @@
 #include "reprojection_estimator.hpp"
 #include "rigid_estimator.hpp"
 
-class CalibrationData;
+class StereoCalibrationData;
 
 class FrameProcessor;
 
@@ -48,7 +48,7 @@ struct ReprojectionFeatureWithError : public ReprojectionFeature {
 class CrossFrameProcessor {
   public:
     CrossFrameProcessor(
-        const CalibrationData& calibration,
+        const StereoCalibrationData& calibration,
         const CrossFrameProcessorConfig& config);
     
     bool process(const FrameProcessor& p1, const FrameProcessor& p2);
@@ -77,7 +77,7 @@ class CrossFrameProcessor {
       return filtered_reprojection_features_;
     }
 
-    const CalibrationData& calibration() const { 
+    const StereoCalibrationData& calibration() const { 
       return calibration_;
     }
 
@@ -114,7 +114,7 @@ class CrossFrameProcessor {
   private:
     CrossFrameProcessorConfig config_;
 
-    const CalibrationData& calibration_;
+    const StereoCalibrationData& calibration_;
 
     // matches[0][i] - best match in the second frame for i-th feature in the first frame
     // matches[1][j] - best match in the first frame for j-th feature in the second frame

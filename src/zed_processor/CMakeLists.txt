@@ -7,7 +7,7 @@ IF(NOT CMAKE_BUILD_TYPE)
     SET(CMAKE_BUILD_TYPE Release)
 ENDIF(NOT CMAKE_BUILD_TYPE)
 
-find_package(ZED 1.1 REQUIRED)
+find_package(ZED 1.0 REQUIRED)
 
 ##For Jetson, OpenCV4Tegra is based on OpenCV2.4
 exec_program(uname ARGS -p OUTPUT_VARIABLE CMAKE_SYSTEM_NAME2)
@@ -15,7 +15,7 @@ if ( CMAKE_SYSTEM_NAME2 MATCHES "aarch64" ) # X1
     SET(OCV_VERSION "2.4")
     SET(CUDA_VERSION "7.0")
 elseif(CMAKE_SYSTEM_NAME2 MATCHES "armv7l" ) # K1
-    SET(OCV_VERSION "2.4")
+    SET(OCV_VERSION "3.1")
     SET(CUDA_VERSION "6.5")
 else() # Desktop
     SET(OCV_VERSION "3.1")
@@ -39,7 +39,10 @@ find_package(OpenCV ${OCV_VERSION} COMPONENTS
   imgproc 
   calib3d 
   xfeatures2d
-  REQUIRED)
+  cudawarping
+  cudafeatures2d
+  REQUIRED
+  PATHS /usr/local/opencv3/share/OpenCV)
 
 find_package(Ceres REQUIRED)
 
@@ -47,7 +50,7 @@ find_package(CUDA ${CUDA_VERSION} REQUIRED)
 
 find_package(Eigen REQUIRED)
 
-find_package(Boost COMPONENTS program_options)
+find_package(Boost COMPONENTS program_options filesystem system)
 
 find_package(libuvc REQUIRED)
 
@@ -79,15 +82,15 @@ link_directories(${OpenCV_LIBRARY_DIRS})
 
 ###############################################################################
 # EXECUTABLE
-add_definitions(-std=c++11 -msse3 -g)# -m64) #-Wall)
+add_definitions(-std=c++11 -g)# -m64) #-Wall)
 
-file(GLOB LIBVISO_SRC_FILES src/libviso/*.cpp)
+#file(GLOB LIBVISO_SRC_FILES src/libviso/*.cpp)
 
-include_directories(src/libviso)
+#include_directories(src/libviso)
 
-add_library(libviso ${LIBVISO_SRC_FILES})
+#add_library(libviso ${LIBVISO_SRC_FILES})
 
-target_link_libraries(libviso)
+#target_link_libraries(libviso)
 
 add_executable(
   clique_test
@@ -96,6 +99,18 @@ add_executable(
 target_link_libraries(
   clique_test
   ${OpenCV_LIBS})
+
+add_executable(
+  calibrate
+  src/calibrate.cc
+  src/calibration_data.cc
+  src/math3d.cc)
+
+target_link_libraries(
+  calibrate
+  ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
+  dw)
 
 add_executable(
   process
@@ -123,21 +138,21 @@ target_link_libraries(
   ${CERES_LIBRARIES}
 )
 
-add_executable(
-  process_viso
-  src/process_viso.cc
-  src/calibration_data.cc
-  src/bag_video_reader.cc
-)
+#add_executable(
+#  process_viso
+#  src/process_viso.cc
+#  src/calibration_data.cc
+#  src/bag_video_reader.cc
+#)
 
-target_link_libraries(
-  process_viso
-  libviso
-  png
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBS}
-  gflags
-)
+#target_link_libraries(
+#  process_viso
+#  libviso
+#  png
+#  ${catkin_LIBRARIES}
+#  ${OpenCV_LIBS}
+#  gflags
+#)
 
 add_executable(
   capture
@@ -155,27 +170,27 @@ target_link_libraries(
   libdw.so
 )
 
-add_executable(
-  zed_capture
-  src/zed_capture.cc)
+#add_executable(
+#  zed_capture
+#  src/zed_capture.cc)
 
-target_link_libraries(
-  zed_capture
-  ${OpenCV_LIBS}
-  ${catkin_LIBRARIES}
-  ${ZED_LIBRARIES}
-)
+#target_link_libraries(
+#  zed_capture
+#  ${OpenCV_LIBS}
+#  ${catkin_LIBRARIES}
+#  ${ZED_LIBRARIES}
+#)
 
-add_executable(
-  zed_test
-  src/zed_test.cc)
+#add_executable(
+#  zed_test
+#  src/zed_test.cc)
 
-target_link_libraries(
-  zed_test
-  ${OpenCV_LIBS}
-  ${catkin_LIBRARIES}
-  ${ZED_LIBRARIES}
-)
+#target_link_libraries(
+#  zed_test
+#  ${OpenCV_LIBS}
+#  ${catkin_LIBRARIES}
+#  ${ZED_LIBRARIES}
+#)
 ###############################################################################
 
 #Add all files in subdirectories of the project in

@@ -1,6 +1,8 @@
 #include <chrono>
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/core/cuda.hpp>
+#include <opencv2/cudawarping.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
 
@@ -14,8 +16,15 @@ struct Match {
   int leftIndex, rightIndex;
 };
 
-FrameProcessor::FrameProcessor(const CalibrationData& calib) : calib_(&calib) {
+FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
+    calib_(&calib) {
   freak_ = cv::xfeatures2d::FREAK::create(true, false);
+      
+
+  for (int i=0; i < 2; ++i) {
+    undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
+    undistort_map_y_[i].upload(calib_->undistort_maps[i].y);
+  }
 }
 
 void FrameProcessor::process(const cv::Mat src[], int threshold) {
@@ -24,25 +33,43 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
   for (int i=0; i < 2; ++i) {
     auto t1 = std::chrono::high_resolution_clock::now();
 
-    cv::remap(
+/*    cv::remap(
         src[i], 
         undistorted_image_[i],
         calib_->undistortMaps[i].x, 
         calib_->undistortMaps[i].y, 
+        cv::INTER_LINEAR);*/
+
+    src_img_[i].upload(src[i]);
+
+    cv::cuda::remap(
+        src_img_[i], 
+        undistorted_image_gpu_[i], 
+        undistort_map_x_[i],
+        undistort_map_y_[i], 
         cv::INTER_LINEAR);
 
+    undistorted_image_gpu_[i].download(undistorted_image_[i]);
+
+    /* double minV, maxV; */
+    /* cv::minMaxIdx(tmp - undistorted_image_[i], &minV, &maxV, nullptr, nullptr); */
+    /* std::cout */ 
+    /*   << "xcxc: " << tmp.size() */ 
+    /*   << minV << " " << maxV << std::endl; */
 
     auto t2 = std::chrono::high_resolution_clock::now();
    
     keypoints_[i].clear();
 
-    cv::AGAST(
-        undistorted_image_[i], 
-        keypoints_[i], 
-        threshold, 
-        true, 
-        cv::AgastFeatureDetector::OAST_9_16);
+    /* cv::FAST( */
+    /*     undistorted_image_[i], */ 
+    /*     keypoints_[i], */ 
+    /*     threshold, */ 
+    /*     true); */
 
+    auto fast = cv::cuda::FastFeatureDetector::create(
+        threshold, true, cv::cuda::FastFeatureDetector::TYPE_9_16, 50000);
+    fast->detect(undistorted_image_gpu_[i], keypoints_[i]);
 
     auto t3 = std::chrono::high_resolution_clock::now();
 

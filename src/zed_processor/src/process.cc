@@ -1,5 +1,6 @@
 #include <boost/program_options.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/core/cuda.hpp>
 
 #include <assert.h>
 
@@ -37,6 +38,7 @@ int main(int argc, char** argv) {
   string video_file, calib_file;
   int start;
   bool debug;
+  int frame_count;
 
   po::options_description desc("Command line options");
   desc.add_options()
@@ -46,6 +48,9 @@ int main(int argc, char** argv) {
       ("start-frame",
        po::value<int>(&start)->default_value(0),
        "start at this second")
+      ("total-frames",
+       po::value<int>(&frame_count)->default_value(0),
+       "number of frames to process")
       ("calib-file",
        po::value<string>(&calib_file)->default_value("data/calib.yml"),
        "path to the calibration file")
@@ -57,7 +62,14 @@ int main(int argc, char** argv) {
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
 
-  CalibrationData calib(RawCalibrationData::read(calib_file));
+  // Initialize GPU
+  int gpu_count = cv::cuda::getCudaEnabledDeviceCount();
+  std::cout << "Found " << gpu_count << " devices" << std::endl;
+  for (int i=0; i < gpu_count; ++i) {
+    cv::cuda::printCudaDeviceInfo(i);
+  }
+
+  StereoCalibrationData calib(RawStereoCalibrationData::read(calib_file));
 
   int frame_width = calib.raw.size.width;
   int frame_height = calib.raw.size.height;
@@ -75,8 +87,8 @@ int main(int argc, char** argv) {
     
   int global_frame_index = start-1;
 
-  cv::namedWindow("debug");
-  cv::setMouseCallback("debug", onMouse, &debug_renderer);
+//  cv::namedWindow("debug");
+//  cv::setMouseCallback("debug", onMouse, &debug_renderer);
 
   FrameProcessor frame_processors[] = {
     FrameProcessor(calib),
@@ -112,7 +124,7 @@ int main(int argc, char** argv) {
   cv::Point3d camT = cv::Point3d(0, 0, 0);
 
   bool done = false;
-  while (!done) {
+  while (!done && (frame_count == 0 || frame_index < frame_count)) {
     timer.mark();
 
     if (!rdr.nextFrame(frame_mat)) {

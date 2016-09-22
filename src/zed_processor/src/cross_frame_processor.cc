@@ -7,7 +7,7 @@
 using namespace std::chrono;
 
 CrossFrameProcessor::CrossFrameProcessor(
-    const CalibrationData& calibration,
+    const StereoCalibrationData& calibration,
     const CrossFrameProcessorConfig& config) 
   : calibration_(calibration), 
     reprojection_estimator_(&calibration.intrinsics),

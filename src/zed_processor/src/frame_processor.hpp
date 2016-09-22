@@ -2,14 +2,16 @@
 #define __FRAME_PROCESSOR__HPP__
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/core/cuda.hpp>
+#include <opencv2/cudafeatures2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
 #include <vector>
 
-struct CalibrationData;
+struct StereoCalibrationData;
 
 class FrameProcessor {
   public:
-    FrameProcessor(const CalibrationData& calib);
+    FrameProcessor(const StereoCalibrationData& calib);
     
     void process(const cv::Mat src[], int threshold=60);
 
@@ -54,9 +56,13 @@ class FrameProcessor {
                std::vector<int>& matches);
 
   private:
-    const CalibrationData* calib_;
+    const StereoCalibrationData* calib_;
 
+    cv::Ptr<cv::cuda::FastFeatureDetector> fast_;
     cv::Ptr<cv::xfeatures2d::FREAK> freak_;
+
+    cv::cuda::GpuMat undistort_map_x_[2], undistort_map_y_[2];
+    cv::cuda::GpuMat src_img_[2], undistorted_image_gpu_[2];
 
     cv::Mat undistorted_image_[2];
 

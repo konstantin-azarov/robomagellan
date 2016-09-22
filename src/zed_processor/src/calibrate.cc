@@ -1,5 +1,6 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
+#include <boost/format.hpp>
 #include <opencv2/opencv.hpp>
 
 #include <string>
@@ -16,6 +17,11 @@ namespace fs = boost::filesystem;
 namespace po = boost::program_options;
 
 using namespace boost::filesystem;
+
+struct CalibrationException : public std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
  
 std::vector<std::vector<cv::Point3f>> modelCorners(
     int cnt, cv::Size sz, double side) {
@@ -41,19 +47,12 @@ typedef std::vector<cv::Point2f> Corners;
 typedef std::vector<Corners> AllCorners;
 typedef std::vector<cv::Mat> Images;
 
-bool detectCorners(
-    const std::string& snapshots_dir,
-    cv::Size chessboard_size,
-    double chessboard_side_mm,
-    cv::Size& img_size,
-    AllCorners* left_corners,
-    AllCorners* right_corners,
-    std::vector<cv::Mat>* left_images,
-    std::vector<cv::Mat>* right_images) {
-  fs::path path(snapshots_dir);
+Images readImages(const std::string& dir) {
+  fs::path path(dir);
 
   fs::directory_iterator end_iter;
 
+  Images res;
   for (
       fs::directory_iterator it(path);
       it != end_iter;
@@ -64,140 +63,92 @@ bool detectCorners(
       continue;
     }
 
-    auto full_img = cv::imread(f.path().c_str(), cv::IMREAD_GRAYSCALE);
-    int w = full_img.cols/2;
-
-    for (int camera_index=0; camera_index < 2; ++camera_index) {
-      auto all_corners = camera_index == 0 ? left_corners : right_corners;
-      if (all_corners != nullptr) {
-        auto all_images = camera_index == 0 ? left_images : right_images;
-
-        auto img = full_img.colRange(w*camera_index, w*(camera_index+1));
-
-        if (all_images != nullptr) {
-          all_images->push_back(img);
-        }
-
-        cv::Size cur_size(img.cols, img.rows);
-        assert(img_size == cv::Size() || cur_size == img_size);
-        img_size = cur_size;
-
-        std::vector<cv::Point2f> corners;
-        if (!cv::findChessboardCorners(
-              img, chessboard_size, corners)) {
-          std::cout << "Failed to find chessboard corners in " 
-            << f.path() << std::endl;
-          return false;
-        }
-
-        cv::cornerSubPix(
-            img, 
-            corners, 
-            cv::Size(11, 11), 
-            cv::Size(-1, -1), 
-            cv::TermCriteria( CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 40, 0.001 ));
-
-        all_corners->push_back(corners);
-      }
-    }
+    res.push_back(cv::imread(f.path().c_str(), cv::IMREAD_GRAYSCALE));
   }
 
-  return true;
+  return res;
 }
-    
 
-bool calibrateCamera(
-    const std::string& snapshots_dir,
+std::pair<Images, Images> splitImages(Images images) {
+  Images left, right;
+
+  for (auto img : images) {
+    int w = img.cols / 2;
+    left.push_back(img.colRange(0, w));
+    right.push_back(img.colRange(w, 2*w));
+  }
+
+  return make_pair(left, right);
+}
+
+Corners detectCorners(const cv::Mat& image, cv::Size chessboard_size) {
+  std::vector<cv::Point2f> corners;
+  if (!cv::findChessboardCorners(
+        image, chessboard_size, corners)) {
+    throw CalibrationException("Failed to find chessboard corners");
+  }
+
+  cv::cornerSubPix(
+      image, 
+      corners, 
+      cv::Size(11, 11), 
+      cv::Size(-1, -1), 
+      cv::TermCriteria( CV_TERMCRIT_EPS + CV_TERMCRIT_ITER, 40, 0.001 ));
+
+  return corners;
+}
+
+AllCorners detectCorners(
+    const Images& images, 
+    cv::Size chessboard_size,
+    cv::Size& img_size) {
+  AllCorners corners;
+
+  for (const auto& img : images) {
+    corners.push_back(detectCorners(img, chessboard_size));
+
+    if (img_size.width != 0 && img.size() != img_size) {
+      throw CalibrationException("Image size mismatch");
+    }
+    img_size = img.size();
+  }
+
+  return corners;
+}
+
+double calibrateCamera(
+    cv::Size img_size,
     cv::Size chessboard_size,
     double chessboard_side_mm,
-    int camera_index,
-    cv::Size& img_size,
-    cv::Mat& cameraMatrix,
-    cv::Mat& distCoeffs,
-    int debug = 0) {
-  AllCorners all_corners;
-  Images all_images;
+    const AllCorners& corners,
+    CameraCalibrationData& calibration) {
 
   std::vector<cv::Mat> rvecs, tvecs;
 
-  if (!detectCorners(
-        snapshots_dir, 
-        chessboard_size, 
-        chessboard_side_mm,
-        img_size,
-        camera_index == 0 ? &all_corners : nullptr,
-        camera_index == 1 ? &all_corners : nullptr,
-        camera_index == 0 ? &all_images : nullptr,
-        camera_index == 1 ? &all_images : nullptr)) {
-    return false;
-  }
-
-
   double residual = cv::calibrateCamera(
-      modelCorners(all_corners.size(), chessboard_size, chessboard_side_mm),
-      all_corners,
+      modelCorners(corners.size(), chessboard_size, chessboard_side_mm),
+      corners,
       img_size,
-      cameraMatrix, 
-      distCoeffs,
+      calibration.m, 
+      calibration.d,
       rvecs,
       tvecs,
       calib_flags,
       cv::TermCriteria(
         cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 100, 1E-6));
 
-  std::cout << "Reprojection error for camera " << camera_index << ": "
-    << residual << std::endl;
-
-  if (debug & DEBUG_ORIGINAL) {
-    for (int i=0; i < (int)all_images.size(); ++i) {
-      cv::Mat dbg_img;
-      cv::cvtColor(all_images[i], dbg_img, CV_GRAY2RGB);
-      cv::drawChessboardCorners(
-          dbg_img, chessboard_size, all_corners[i], true);
-
-      cv::imshow("debug", dbg_img);
-      cv::waitKey(-1);
-    }
-  }
-
-  if (debug & DEBUG_UNDISTORTED) {
-    cv::Mat undistorted_img(img_size.height, img_size.width, CV_8UC1);
-    cv::Mat newCameraMat = 
-      cv::getOptimalNewCameraMatrix(cameraMatrix, distCoeffs, img_size, 1);
-
-    for (auto img : all_images) {
-      cv::undistort(
-          img, undistorted_img, cameraMatrix, distCoeffs, newCameraMat);
-
-      cv::imshow("debug", undistorted_img);
-      cv::waitKey(-1);
-    }
-  }
-
-  return true;
+  return residual;
 }
 
-bool calibrateStereo(
-    const std::string& snapshots_dir,
+double calibrateStereo(
+    cv::Size img_size, 
     cv::Size chessboard_size,
     int chessboard_side_mm,
-    cv::Size& img_size, 
-    cv::Mat& leftM, cv::Mat& leftD,
-    cv::Mat& rightM, cv::Mat& rightD,
-    cv::Mat& R, cv::Mat& T,
-    AllCorners& left_corners, AllCorners& right_corners,
-    Images& left_images, Images& right_images) {
-  if (!detectCorners(
-        snapshots_dir,
-        chessboard_size,
-        chessboard_side_mm,
-        img_size,
-        &left_corners,
-        &right_corners,
-        &left_images,
-        &right_images)) {
-    return false;
-  }
+    const AllCorners& left_corners,
+    const AllCorners& right_corners,
+    CameraCalibrationData left_camera,
+    CameraCalibrationData right_camera,
+    cv::Mat& R, cv::Mat& T) {
 
   assert(left_corners.size() == right_corners.size());
 
@@ -209,14 +160,14 @@ bool calibrateStereo(
     cv::solvePnP(
         modelPoints,
         left_corners[i],
-        leftM, leftD,
+        left_camera.m, left_camera.d,
         tmp, leftT);
     cv::Rodrigues(tmp, leftR);
 
     cv::solvePnP(
         modelPoints,
         right_corners[i],
-        rightM, rightD,
+        right_camera.m, right_camera.d,
         tmp, rightT);
     cv::Rodrigues(tmp, rightR);
 
@@ -232,7 +183,7 @@ bool calibrateStereo(
     cv::projectPoints(
         modelPoints,
         leftR, leftT,
-        leftM, leftD,
+        left_camera.m, left_camera.d,
         left_img_points);
 
     for (int j=0; j < (int)left_img_points.size(); ++j) {
@@ -244,7 +195,7 @@ bool calibrateStereo(
     cv::projectPoints(
         modelPoints,
         rightR, rightT,
-        rightM, rightD,
+        right_camera.m, right_camera.d,
         right_img_points);
 
     for (int j=0; j < (int)left_img_points.size(); ++j) {
@@ -254,14 +205,14 @@ bool calibrateStereo(
     residual /= right_img_points.size() + left_img_points.size();
     residual = sqrt(residual);
 
-    cv::Mat dbg_img(img_size.height, 2*img_size.width, CV_8UC3);
-    cv::cvtColor(left_images[i], dbg_img.colRange(0, img_size.width), CV_GRAY2RGB);
-    cv::drawChessboardCorners(
-        dbg_img.colRange(0, img_size.width), chessboard_size, left_corners[i], true);
+    /* cv::Mat dbg_img(img_size.height, 2*img_size.width, CV_8UC3); */
+    /* cv::cvtColor(left_images[i], dbg_img.colRange(0, img_size.width), CV_GRAY2RGB); */
+    /* cv::drawChessboardCorners( */
+    /*     dbg_img.colRange(0, img_size.width), chessboard_size, left_corners[i], true); */
     
-    cv::cvtColor(right_images[i], dbg_img.colRange(img_size.width, img_size.width*2), CV_GRAY2RGB);
-    cv::drawChessboardCorners(
-        dbg_img.colRange(img_size.width, img_size.width*2), chessboard_size, right_img_points, true);
+    /* cv::cvtColor(right_images[i], dbg_img.colRange(img_size.width, img_size.width*2), CV_GRAY2RGB); */
+    /* cv::drawChessboardCorners( */
+    /*     dbg_img.colRange(img_size.width, img_size.width*2), chessboard_size, right_img_points, true); */
 
 //    cv::imshow("debug", dbg_img);
 //    cv::waitKey(-1);
@@ -280,22 +231,13 @@ bool calibrateStereo(
       modelCorners(left_corners.size(), chessboard_size, chessboard_side_mm),
       left_corners,
       right_corners,
-      leftM, leftD,
-      rightM, rightD,
+      left_camera.m, left_camera.d,
+      right_camera.m, right_camera.d,
       img_size,
       R, T, E, F,
       cv::CALIB_FIX_INTRINSIC | calib_flags);
   
-  cv::Mat tmp;
-  cv::Rodrigues(R, tmp);
-
-  std::cout << "R = " << tmp << std::endl;
-  std::cout << "T = " << T << std::endl;
-  std::cout << "Stereo calibration residual: " << residual << std::endl;
-
-
-
-  return true;
+  return residual;
 }
 
 cv::Vec2d findVanishingPoint(
@@ -373,9 +315,13 @@ int main(int argc, char** argv) {
   std::string snapshots_dir, calib_file;
   cv::Size chessboard_size;
   double chessboard_side_mm;
+  bool mono;
 
   po::options_description desc("Command line options");
   desc.add_options()
+      ("mono",
+       po::bool_switch(&mono)->default_value(false),
+       "calibrate one camera only")
       ("calib-file",
        po::value(&calib_file)->default_value("data/calib.yml"),
        "path to the calibration file")
@@ -395,112 +341,133 @@ int main(int argc, char** argv) {
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
 
-  RawCalibrationData raw_calib;
+  if (mono) {
+    /* RawMonoCalibrationData raw_calib; */
 
-  if (!calibrateCamera(
-        snapshots_dir + "/left", 
+    /* if (!calibrateCamera( */
+    /*       snapshots_dir, */
+    /*       chessboard_size, */
+    /*       chessboard_side_mm, */
+    /*       0, */
+    /*       raw_calib.size, */
+    /*       raw_calib.camera.m, */
+    /*       raw_calib.camera.d)) { */
+    /*   std::cout << "Failed to calibrate camera" << std::endl; */
+    /*   return 1; */
+    /* } */
+
+
+  } else {
+    RawStereoCalibrationData raw_calib;
+
+    auto left_images = 
+      splitImages(readImages(snapshots_dir + "/left")).first;
+    auto left_corners = detectCorners(
+        left_images, chessboard_size, raw_calib.size);
+
+    auto right_images = 
+      splitImages(readImages(snapshots_dir + "/right")).second;
+    auto right_corners = detectCorners(
+        right_images, chessboard_size, raw_calib.size);
+
+    auto stereo_images =
+      splitImages(readImages(snapshots_dir + "/stereo"));
+    auto stereo_corners = make_pair(
+        detectCorners(stereo_images.first, chessboard_size, raw_calib.size),
+        detectCorners(stereo_images.second, chessboard_size, raw_calib.size));
+
+    double left_residual = calibrateCamera(
+        raw_calib.size,
         chessboard_size, 
         chessboard_side_mm,
-        0,
-        raw_calib.size,
-        raw_calib.Ml,
-        raw_calib.dl,
-        DEBUG_UNDISTORTED)) {
-    std::cout << "Failed to calibrate left camera" << std::endl;
-    return 1;
-  }
+        left_corners,
+        raw_calib.left_camera);
 
-  if (!calibrateCamera(
-        snapshots_dir + "/right", 
+    double right_residual = calibrateCamera(
+        raw_calib.size,
         chessboard_size, 
         chessboard_side_mm,
-        1,
-        raw_calib.size,
-        raw_calib.Mr,
-        raw_calib.dr,
-        DEBUG_UNDISTORTED)) {
-    std::cout << "Failed to calibrate right camera" << std::endl;
-    return 1;
-  }
-
-  AllCorners left_corners, right_corners;
-  Images left_images, right_images;
-
-  if (!calibrateStereo(
-        snapshots_dir + "/stereo",
-        chessboard_size,
-        chessboard_side_mm,
-        raw_calib.size,
-        raw_calib.Ml, raw_calib.dl,
-        raw_calib.Mr, raw_calib.dr,
-        raw_calib.R, raw_calib.T,
-        left_corners, right_corners,
-        left_images, right_images)) {
-    std::cout << "Failed to calibrate stereo pair" << std::endl;
-    return 1;
-  }
-
-  raw_calib.write(calib_file);
-
-  CalibrationData calib(raw_calib);
-
-  for (int i=0; i < (int)left_corners.size(); ++i) {
-    std::vector<cv::Point2f> left, right;
-
-    cv::undistortPoints(
-        left_corners[i], left, 
-        calib.raw.Ml, calib.raw.dl, calib.Rl, calib.Pl);
-    
-    cv::undistortPoints(
-        right_corners[i], right, 
-        calib.raw.Mr, calib.raw.dr, calib.Rr, calib.Pr);
-  
-    int w = raw_calib.size.width;
-    cv::Mat dbg_img(raw_calib.size.height, 2*w, CV_8UC3);
-    cv::Mat dbg_left(dbg_img.colRange(0, w));
-    cv::Mat dbg_right(dbg_img.colRange(w, w*2));
-    cv::Mat tmp;
-
-    cv::remap(
-        left_images[i], 
-        tmp, 
-        calib.undistortMaps[0].x, calib.undistortMaps[0].y, 
-        cv::INTER_LINEAR);
-    cv::cvtColor(tmp, dbg_left, CV_GRAY2RGB);
-
-    cv::remap(
-        right_images[i], 
-        tmp, 
-        calib.undistortMaps[1].x, calib.undistortMaps[1].y, 
-        cv::INTER_LINEAR);
-    cv::cvtColor(tmp, dbg_right, CV_GRAY2RGB);
-    
-    for (int j=0; j < (int)left.size(); ++j) {
-      drawCross(dbg_left, left[j], cv::Scalar(0, 0, 255));
-      drawCross(dbg_right, right[j], cv::Scalar(0, 0, 255));
-    }
-
-    auto points_left = 
-      findVanishingPoints(left, chessboard_size.width, &dbg_left);
-    auto points_right = 
-      findVanishingPoints(right, chessboard_size.width, &dbg_right);
-
-    auto points_left_n = normalizePoints(points_left, raw_calib.Ml);
-    auto points_right_n = normalizePoints(points_right, raw_calib.Mr);
-
-    std::cout << points_left_n.first.t() * points_left_n.second << std::endl;
-    std::cout << points_right_n.first.t() * points_right_n.second << std::endl;
+        right_corners,
+        raw_calib.right_camera);
+ 
+    double stereo_residual = calibrateStereo(
+          raw_calib.size,
+          chessboard_size,
+          chessboard_side_mm,
+          stereo_corners.first,
+          stereo_corners.second,
+          raw_calib.left_camera,
+          raw_calib.right_camera,
+          raw_calib.R, raw_calib.T);
 
     std::cout 
-      << "left = " << points_left.first << ", " << points_left.second 
-      << "; right = " << points_right.first  << ", " << points_right.second
-      << "; d = " << points_left.first - points_right.first << ", " 
-      << points_left.second - points_right.second
-      << std::endl;
+      << "Stereo calibration residuals: " << std::endl
+      << "  left = " << left_residual << std::endl
+      << "  right = " << right_residual << std::endl
+      << "  stereo = " << stereo_residual << std::endl;
+
+    raw_calib.write(calib_file);
+
+    StereoCalibrationData calib(raw_calib);
+
+    for (int i=0; i < (int)left_corners.size(); ++i) {
+      std::vector<cv::Point2f> left, right;
+
+      cv::undistortPoints(
+          stereo_corners.first[i], left, 
+          calib.raw.left_camera.m, calib.raw.right_camera.d, calib.Rl, calib.Pl);
+      
+      cv::undistortPoints(
+          stereo_corners.second[i], right, 
+          calib.raw.right_camera.m, calib.raw.right_camera.d, calib.Rr, calib.Pr);
+    
+      int w = raw_calib.size.width;
+      cv::Mat dbg_img(raw_calib.size.height, 2*w, CV_8UC3);
+      cv::Mat dbg_left(dbg_img.colRange(0, w));
+      cv::Mat dbg_right(dbg_img.colRange(w, w*2));
+      cv::Mat tmp;
+
+      cv::remap(
+          stereo_images.first[i], 
+          tmp, 
+          calib.undistort_maps[0].x, calib.undistort_maps[0].y, 
+          cv::INTER_LINEAR);
+      cv::cvtColor(tmp, dbg_left, CV_GRAY2RGB);
+
+      cv::remap(
+          stereo_images.second[i], 
+          tmp, 
+          calib.undistort_maps[1].x, calib.undistort_maps[1].y, 
+          cv::INTER_LINEAR);
+      cv::cvtColor(tmp, dbg_right, CV_GRAY2RGB);
+      
+      for (int j=0; j < (int)left.size(); ++j) {
+        drawCross(dbg_left, left[j], cv::Scalar(0, 0, 255));
+        drawCross(dbg_right, right[j], cv::Scalar(0, 0, 255));
+      }
+
+      auto points_left = 
+        findVanishingPoints(left, chessboard_size.width, &dbg_left);
+      auto points_right = 
+        findVanishingPoints(right, chessboard_size.width, &dbg_right);
+
+      auto points_left_n = normalizePoints(points_left, raw_calib.left_camera.m);
+      auto points_right_n = normalizePoints(points_right, raw_calib.right_camera.m);
+
+      std::cout << points_left_n.first.t() * points_left_n.second << std::endl;
+      std::cout << points_right_n.first.t() * points_right_n.second << std::endl;
+
+      std::cout 
+        << "left = " << points_left.first << ", " << points_left.second 
+        << "; right = " << points_right.first  << ", " << points_right.second
+        << "; d = " << points_left.first - points_right.first << ", " 
+        << points_left.second - points_right.second
+        << std::endl;
 
 
-    cv::imshow("debug", dbg_img);
-    cv::waitKey(-1);
+      cv::imshow("debug", dbg_img);
+      cv::waitKey(-1);
+    }
   }
 
   return 0;

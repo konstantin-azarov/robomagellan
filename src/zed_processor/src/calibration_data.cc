@@ -3,16 +3,17 @@
 
 #include "calibration_data.hpp"
 
-RawCalibrationData RawCalibrationData::read(const std::string& filename) {
-  RawCalibrationData res;
+RawStereoCalibrationData RawStereoCalibrationData::read(
+    const std::string& filename) {
+  RawStereoCalibrationData res;
   
   cv::FileStorage fs(filename, cv::FileStorage::READ);
 
   fs["size"] >> res.size;
-  fs["Ml"] >> res.Ml;
-  fs["dl"] >> res.dl;
-  fs["Mr"] >> res.Mr;
-  fs["dr"] >> res.dr;
+  fs["Ml"] >> res.left_camera.m;
+  fs["dl"] >> res.left_camera.d;
+  fs["Mr"] >> res.right_camera.m;
+  fs["dr"] >> res.right_camera.d;
 
   cv::Mat om;
   fs["om"] >> om;
@@ -23,14 +24,14 @@ RawCalibrationData RawCalibrationData::read(const std::string& filename) {
   return res;
 }
 
-void RawCalibrationData::write(const std::string& filename) {
+void RawStereoCalibrationData::write(const std::string& filename) {
   cv::FileStorage fs(filename, cv::FileStorage::WRITE);
 
   cv::write(fs, "size", size);
-  cv::write(fs, "Ml", Ml);
-  cv::write(fs, "dl", dl);
-  cv::write(fs, "Mr", Mr);
-  cv::write(fs, "dr", dr);
+  cv::write(fs, "Ml", left_camera.m);
+  cv::write(fs, "dl", left_camera.d);
+  cv::write(fs, "Mr", right_camera.m);
+  cv::write(fs, "dr", right_camera.d);
 
   cv::Mat om;
   cv::Rodrigues(R, om);
@@ -39,12 +40,13 @@ void RawCalibrationData::write(const std::string& filename) {
   cv::write(fs, "T", T);
 }
 
-CalibrationData::CalibrationData(const RawCalibrationData& raw) {
+StereoCalibrationData::StereoCalibrationData(
+    const RawStereoCalibrationData& raw) {
   this->raw = raw;
 
   cv::stereoRectify(
-      raw.Ml, raw.dl, 
-      raw.Mr, raw.dr, 
+      raw.left_camera.m, raw.left_camera.d, 
+      raw.right_camera.m, raw.right_camera.d, 
       raw.size,
       raw.R, raw.T,
       Rl, Rr,
@@ -54,16 +56,16 @@ CalibrationData::CalibrationData(const RawCalibrationData& raw) {
       0); 
 
   cv::initUndistortRectifyMap(
-      raw.Ml, raw.dl, Rl, Pl, 
+      raw.left_camera.m, raw.left_camera.d, Rl, Pl, 
       raw.size,
       CV_32FC1,
-      undistortMaps[0].x, undistortMaps[0].y);
+      undistort_maps[0].x, undistort_maps[0].y);
 
   cv::initUndistortRectifyMap(
-      raw.Mr, raw.dr, Rr, Pr, 
+      raw.right_camera.m, raw.right_camera.d, Rr, Pr, 
       raw.size, 
       CV_32FC1,
-      undistortMaps[1].x, undistortMaps[1].y);
+      undistort_maps[1].x, undistort_maps[1].y);
 
   assert(Pl.rows == 3 && Pl.cols == 4);
   assert(Pr.rows == 3 && Pr.cols == 4);
