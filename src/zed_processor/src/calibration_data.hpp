@@ -9,14 +9,15 @@ struct CameraCalibrationData {
 };
 
 struct RawMonoCalibrationData {
+  static RawMonoCalibrationData read(const std::string& filename);
+  void write(const std::string& filename);
+
   cv::Size size;
   CameraCalibrationData camera;
 };
 
 struct RawStereoCalibrationData {
-  static RawStereoCalibrationData read(
-      const std::string& filename);
-
+  static RawStereoCalibrationData read(const std::string& filename);
   void write(const std::string& filename);
 
   cv::Size size;
@@ -28,17 +29,24 @@ struct UndistortMaps {
   cv::Mat x, y;
 };
 
-struct MonoCalibrationData {
-  MonoCalibrationData() = delete;
-  MonoCalibrationData(const RawMonoCalibrationData& raw);
-
-  CameraCalibrationData raw;
-
-  UndistortMaps undistortMaps;
+struct MonoIntrinsics {
+  double f, cx, cy;
 };
 
-struct StereoIntrinsics {
-  double f, dr, cxl, cxr, cy;
+struct MonoCalibrationData {
+  MonoCalibrationData() = delete;
+  MonoCalibrationData(
+      const RawMonoCalibrationData& raw,
+      cv::Mat new_m,
+      cv::Size target_size);
+
+  RawMonoCalibrationData raw;
+
+  UndistortMaps undistort_maps;
+};
+
+struct StereoIntrinsics : public MonoIntrinsics {
+  double dr;
 };
 
 struct StereoCalibrationData {

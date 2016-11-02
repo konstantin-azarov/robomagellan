@@ -27,10 +27,19 @@ std::pair<cv::Point2d, cv::Point2d> projectPoint(
     const cv::Point3d& p) {
 
   double v = i.f * p.y / p.z + i.cy;
-  cv::Point2d left(i.f * p.x / p.z + i.cxl, v);
-  cv::Point2d right((i.f * p.x + i.dr) / p.z + i.cxr, v);
+  cv::Point2d left(i.f * p.x / p.z + i.cx, v);
+  cv::Point2d right((i.f * p.x + i.dr) / p.z + i.cx, v);
 
   return std::make_pair(left, right);
+}
+
+cv::Point2d projectPoint(const MonoIntrinsics& c, const cv::Point3d& p) {
+  cv::Point2d res;
+
+  res.x = p.x/p.z * c.f + c.cx;
+  res.y = p.y/p.z * c.f + c.cy;
+
+  return res;
 }
 
 cv::Mat rotX(double angle) {
@@ -78,16 +87,30 @@ cv::Mat rotZ(double angle) {
   return res;
 }
 
-bool compareMats(const cv::Mat& l, const cv::Mat& r, double eps) {
-  for (int i=0; i < 3; ++i) {
-    for (int j=0; j < 3; ++j) {
-      if (std::abs(l.at<double>(i, j) - r.at<double>(i, j)) > eps) {
-        return false;
-      }
-    }
-  }
+cv::Vec3d rotToEuler(const cv::Mat& r) {
+  cv::Vec3d z = r.col(2);
+  cv::Vec3d x = r.col(0);
 
-  return true;
+  cv::Vec3d res;
+
+  // Yaw
+  res(0) = atan2(z(0), z(2));
+  // Pitch
+  res(1) = atan2(-z(1), sqrt(z(0)*z(0) + z(2)*z(2)));
+  // Roll
+  cv::Vec3d x1(z(2), 0, -z(0));
+  auto cp = x1.cross(x);
+  double roll = asin(cv::norm(cp) / cv::norm(x1));
+  if (x(1) < 0) {
+    roll = -roll;
+  }
+  res(2) = roll; 
+
+  return res;
+}
+
+bool compareMats(const cv::Mat& l, const cv::Mat& r, double eps) {
+  return cv::countNonZero(cv::abs(l - r) >= eps) == 0;
 }
 
 bool comparePoints(const cv::Point3d& l, const cv::Point3d& r, double eps) {

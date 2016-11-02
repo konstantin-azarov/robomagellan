@@ -7,52 +7,176 @@
 #include "cross_frame_processor.hpp"
 #include "math3d.hpp"
 
-DebugRenderer::DebugRenderer(int max_width, int max_height) :
-    max_width_(max_width), max_height_(max_height) {
-  assert(max_width_ % 2 == 0);
-  assert(max_height_ % 2 == 0);
-}
-
-void DebugRenderer::start(
+DebugRenderer::DebugRenderer(
     const FrameProcessor* p1,
     const FrameProcessor* p2,
-    const CrossFrameProcessor* cfp) {
-  cfp_ = cfp;
-  p1_ = p1;
-  p2_ = p2;
+    const CrossFrameProcessor* cfp,
+    const DirectionTracker* direction_tracker,
+    const MonoCalibrationData* mono_calibration,
+    int max_width, int max_height) 
+    : p1_(p1),
+      p2_(p2),
+      cfp_(cfp),
+      dt_(direction_tracker),
+      mono_calibration_(mono_calibration),
+      max_width_(max_width), 
+      max_height_(max_height) {
+  assert(max_width_ % 2 == 0);
+  assert(max_height_ % 2 == 0);
 
   const auto& left1 = p1_->undistortedImage(0);
 
-  int w = left1.cols;
-  int h = left1.rows;
+  w_ = left1.cols;
+  h_ = left1.rows;
 
   scale_ = 1.0;
-  if (2*w > max_width_) {
-    scale_ = max_width_/(2.0*w);
+  if (2*w_ > max_width_) {
+    scale_ = max_width_/(2.0*w_);
   }
 
-  if (2*h > max_height_) {
-    scale_ = std::min(scale_, max_height_/(2.0*h));
+  if (2*h_ > max_height_) {
+    scale_ = std::min(scale_, max_height_/(2.0*h_));
+  }
+}
+
+bool DebugRenderer::loop() {
+  bool done = false,
+       next_frame = false;
+
+  bool stereo_mode = true;
+
+  bool show_features = false, 
+       show_matches = false,
+       show_cross_matches = false,
+       show_filtered_matches = false,
+       show_clique = false,
+       show_clique_cross_features = false,
+       show_inlier_features = false;
+
+  while (!done) {
+    if (stereo_mode) {
+      renderStereo();
+
+      if (show_features) {
+        renderFeatures();
+      }
+
+      if (show_matches) {
+        renderMatches();
+      }
+
+      if (show_cross_matches) {
+        renderAllCrossMatches();
+      }
+
+      if (show_filtered_matches) {
+        renderFilteredCrossMatches();
+      }
+
+      if (show_clique) {
+        renderCliqueMatches();
+      }
+
+      if (show_clique_cross_features) {
+        renderCliqueFeatures();
+      }
+
+      if (show_inlier_features) {
+        renderInlierFeatures();
+      }
+    } else {
+      renderTarget();
+
+      if (show_matches) {
+        renderTargetMatches(dt_->reprojectionFeatures());
+      }
+
+      if (show_inlier_features) {
+        renderTargetMatches(dt_->bestSample());
+      }
+    }
+
+    cv::Mat scaled_image;
+    cv::resize(img_, scaled_image, cv::Size(), scale_, scale_);
+    cv::imshow("debug", scaled_image);
+    
+    int key = cv::waitKey(0);
+    if (key != -1) {
+      key &= 0xFF;
+    }
+    switch(key) {
+      case 't':
+        stereo_mode = !stereo_mode;
+        break;
+      case 'f':
+        show_features = !show_features;
+        break;
+      case 'm':
+        show_matches = !show_matches;
+        break;
+      case 'x':
+        show_cross_matches = !show_cross_matches;
+        break;
+      case 'z':
+        show_filtered_matches = !show_filtered_matches;
+        break;
+      case 'c':
+        show_clique = !show_clique;
+        break;
+      case '1':
+        show_clique_cross_features = !show_clique_cross_features;
+        break;
+      case '2':
+        show_inlier_features = !show_inlier_features;
+        break;
+      case 'n':
+        next_frame = true;
+        done = true;
+        break;
+      case 27:
+        done = true;
+        break;
+    }
   }
 
-  w = (int)(scale_*w);
-  h = (int)(scale_*h);
-  
-  img_.create(2*h, 2*w, CV_8UC3);
+  return next_frame;
+}
+
+void DebugRenderer::renderStereo() {
+  img_.create(2*h_, 2*w_, CV_8UC3);
 
   drawImage_(
-      left1, img_(cv::Range(0, h), cv::Range(0, w)));
+      p1_->undistortedImage(0), img_(cv::Range(0, h_), cv::Range(0, w_)));
   drawImage_(
-      p1_->undistortedImage(1), img_(cv::Range(0, h), cv::Range(w, 2*w)));
+      p1_->undistortedImage(1), img_(cv::Range(0, h_), cv::Range(w_, 2*w_)));
   drawImage_(
-      p2_->undistortedImage(0), img_(cv::Range(h, 2*h), cv::Range(0, w)));
+      p2_->undistortedImage(0), img_(cv::Range(h_, 2*h_), cv::Range(0, w_)));
   drawImage_(
-      p2_->undistortedImage(1), img_(cv::Range(h, 2*h), cv::Range(w, 2*w)));
+      p2_->undistortedImage(1), img_(cv::Range(h_, 2*h_), cv::Range(w_, 2*w_)));
+}
+
+void DebugRenderer::renderTarget() {
+  img_.create(h_, 2*w_, CV_8UC3);
+
+  drawImage_(
+      p1_->undistortedImage(0), img_(cv::Range(0, h_), cv::Range(0, w_)));
+
+  cv::Mat target_img_raw = cv::imread(
+      dt_->target()->image_file,
+      cv::IMREAD_GRAYSCALE);
+  cv::Mat target_img;
+
+  cv::remap(
+      target_img_raw,
+      target_img,
+      mono_calibration_->undistort_maps.x,
+      mono_calibration_->undistort_maps.y,
+      cv::INTER_LINEAR);
+  drawImage_(
+      target_img, img_(cv::Range(0, h_), cv::Range(w_, 2*w_))); 
 }
 
 void DebugRenderer::renderFeatures() {
-  int w = img_.cols/2;
-  int h = img_.rows/2;
   int row = 0;
 
   for (auto* p : { p1_, p2_ }) {
@@ -65,7 +189,7 @@ void DebugRenderer::renderFeatures() {
 
         cv::circle(
             img_, 
-            pt * scale_ + cv::Point2f(w*t, h*row), 
+            pt + cv::Point2f(w_*t, h_*row), 
             3, 
             cv::Scalar(0, 255, 0));
       }
@@ -76,8 +200,6 @@ void DebugRenderer::renderFeatures() {
 }
 
 void DebugRenderer::renderMatches() {
-  int w = img_.cols/2;
-  int h = img_.rows/2;
   int row = 0;
 
   for (const auto* p : { p1_, p2_ }) {
@@ -98,8 +220,8 @@ void DebugRenderer::renderMatches() {
         color = cv::Scalar(0, 255, 0);
       }
         
-      auto pl = f.first * scale_ + cv::Point2f(0, row*h);
-      auto pr = f.second * scale_ + cv::Point2f(w, row*h);
+      auto pl = f.first + cv::Point2f(0, row*h_);
+      auto pr = f.second + cv::Point2f(w_, row*h_);
       cv::circle(img_, pl, 3, color);
       cv::circle(img_, pr, 3, color);
     }
@@ -108,13 +230,28 @@ void DebugRenderer::renderMatches() {
   }
 }
 
+void DebugRenderer::renderTargetMatches(
+    const std::vector<MonoReprojectionFeature>& features) {
+  cv::Scalar color(0, 255, 0);
+
+  for (const auto& f : features) {
+    cv::line(
+        img_,
+        f.s1,
+        f.s2 + cv::Point2d(w_),
+        color,
+        1);
+    cv::circle(img_, f.s1, 3, cv::Scalar(0, 0, 255));
+    cv::circle(img_, f.s2 + cv::Point2d(w_), 3, cv::Scalar(0, 0, 255));
+  }
+}
+
 void DebugRenderer::renderPointFeatures(int p) {
-  int w = img_.cols/2;
   auto f = p2_->features(p);
 
   cv::circle(img_, f.first, 3, cv::Scalar(255, 0, 0));
   cv::circle(
-      img_, cv::Point(f.second.x + w, f.second.y), 3, cv::Scalar(255, 0, 0));
+      img_, cv::Point(f.second.x + w_, f.second.y), 3, cv::Scalar(255, 0, 0));
 }
 
 void DebugRenderer::renderAllCrossMatches() {
@@ -164,42 +301,42 @@ void DebugRenderer::renderInlierFeatures() {
 
 void DebugRenderer::renderReprojectionFeatures(
     const std::vector<ReprojectionFeatureWithError>& features) {
-  int w = img_.cols/2, h = img_.rows/2;
-
   cv::Scalar green(0, 255, 0), red(0, 0, 255);
 
   auto R = cfp_->rot();
   auto tm = cfp_->t();
 
-  std::cout << "Clique errors:" << std::endl;
+  std::cout << "Clique errors:";
 
   for (const auto& f : features) {
     auto p1 = projectPoint(cfp_->calibration().intrinsics, R.t()*(f.r2 - tm));
     auto p2 = projectPoint(cfp_->calibration().intrinsics, R*f.r1 + tm);
 
-    drawCross_(f.s1l * scale_, green);
-    drawCross_(f.s2l * scale_ + cv::Point2d(0, h), green);
-    cv::circle(img_, p1.first * scale_, 5, red);
-    cv::circle(img_, p1.second * scale_ + cv::Point2d(w, 0), 5, red);
-    cv::line(img_, f.s1l * scale_, f.s2l * scale_ + cv::Point2d(0, h), green);
-    cv::line(img_, f.s1l * scale_, p1.first * scale_, red);
+    drawCross_(f.s1l, green);
+    drawCross_(f.s2l + cv::Point2d(0, h_), green);
+    cv::circle(img_, p1.first, 5, red);
+    cv::circle(img_, p1.second + cv::Point2d(w_, 0), 5, red);
+    cv::line(img_, f.s1l, f.s2l + cv::Point2d(0, h_), green);
+    cv::line(img_, f.s1l, p1.first, red);
     cv::line(
         img_, 
-        f.s1r * scale_ + cv::Point2d(w, 0), 
-        p1.second * scale_ + cv::Point2d(w, 0), 
+        f.s1r + cv::Point2d(w_, 0), 
+        p1.second + cv::Point2d(w_, 0), 
         red);
 
-    drawCross_(f.s1r * scale_ + cv::Point2d(w, 0), green);
-    drawCross_(f.s2r * scale_ + cv::Point2d(w, h), green);
+    drawCross_(f.s1r + cv::Point2d(w_, 0), green);
+    drawCross_(f.s2r + cv::Point2d(w_, h_), green);
     cv::line(
         img_, 
-        f.s1r * scale_ + cv::Point2d(w, 0), 
-        f.s2r * scale_ + cv::Point2d(w, h), green);
-    cv::circle(img_, p2.first * scale_ + cv::Point2d(0, h), 5, red);
-    cv::circle(img_, p2.second * scale_ + cv::Point2d(w, h), 5, red);
+        f.s1r + cv::Point2d(w_, 0), 
+        f.s2r + cv::Point2d(w_, h_), green);
+    cv::circle(img_, p2.first + cv::Point2d(0, h_), 5, red);
+    cv::circle(img_, p2.second + cv::Point2d(w_, h_), 5, red);
 
-    std::cout << " " << f.error << std::endl;
+    std::cout << " " << f.error;
   }
+
+  std::cout << std::endl;
 }
 
 void DebugRenderer::dumpClique(const std::string& filename) {
@@ -235,18 +372,15 @@ std::ostream& operator << (std::ostream& s, const cv::KeyPoint& kp) {
 }
 
 void DebugRenderer::selectKeypoint(int u, int v) {
-  int w = img_.cols/2;
-  int h = img_.rows/2;
-
-  int side = u >= w ? 1 : 0;
-  int frame = v >= h ? 1 : 0;
+  int side = u >= w_ ? 1 : 0;
+  int frame = v >= h_ ? 1 : 0;
 
   auto p = frame == 0 ? p1_ : p2_;
 
   const auto& kps = p->keypoints(side);
 
-  int x = std::round((u - side*w)/scale_);
-  int y = std::round((v - frame*h)/scale_);
+  int x = std::round((u - side*w_)/scale_);
+  int y = std::round((v - frame*h_)/scale_);
 
   int best = -1;
   double best_d = 1E+100;
@@ -267,7 +401,7 @@ void DebugRenderer::selectKeypoint(int u, int v) {
 
   std::cout << best << ": " << kp << std::endl;
 
-  auto p1 = kp.pt*scale_ + cv::Point2f(side*w, frame*h);
+  auto p1 = kp.pt*scale_ + cv::Point2f(side*w_, frame*h_);
   cv::circle(img_, p1, 3, cv::Scalar(0, 0, 255));
 
   int match = p->matches(side)[best]; 
@@ -276,7 +410,7 @@ void DebugRenderer::selectKeypoint(int u, int v) {
     const auto& kp2 = p->keypoints(1-side)[match];
     std::cout << "match = " << match << ": " << kp2 << std::endl;
 
-    auto p2 = kp2.pt*scale_ + cv::Point2f((1-side)*w, frame*h);
+    auto p2 = kp2.pt*scale_ + cv::Point2f((1-side)*w_, frame*h_);
     cv::circle(img_, p2, 3, cv::Scalar(0, 0, 255));
     cv::line(img_, p1, p2, cv::Scalar(0, 0, 255));
 
@@ -304,13 +438,10 @@ void DebugRenderer::drawImage_(const cv::Mat& src, const cv::Mat& dest) {
 }
 
 void DebugRenderer::drawMatch_(const CrossFrameMatch& m) {
-    int w = img_.cols/2;
-    int h = img_.rows/2;
-
-    auto p1l = p1_->features(m.i1).first * scale_ + cv::Point2f(0, 0);
-    auto p1r = p1_->features(m.i1).second * scale_ + cv::Point2f(w, 0);
-    auto p2l = p2_->features(m.i2).first * scale_ + cv::Point2f(0, h);
-    auto p2r = p2_->features(m.i2).second * scale_ + cv::Point2f(w, h);
+    auto p1l = p1_->features(m.i1).first + cv::Point2f(0, 0);
+    auto p1r = p1_->features(m.i1).second + cv::Point2f(w_, 0);
+    auto p2l = p2_->features(m.i2).first + cv::Point2f(0, h_);
+    auto p2r = p2_->features(m.i2).second + cv::Point2f(w_, h_);
 
     cv::circle(img_, p1l, 3, cv::Scalar(0, 255, 0));
     cv::circle(img_, p1r, 3, cv::Scalar(0, 255, 0));

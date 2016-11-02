@@ -6,19 +6,30 @@
 
 #include "calibration_data.hpp"
 #include "cross_frame_processor.hpp"
+#include "direction_tracker.hpp"
 
 class DebugRenderer {
   public:
-    DebugRenderer(int max_width, int max_height);
-
-    void start(
-        const FrameProcessor* p1, 
+    DebugRenderer(
+        const FrameProcessor* p1,
         const FrameProcessor* p2,
-        const CrossFrameProcessor* cfp);
+        const CrossFrameProcessor* cfp,
+        const DirectionTracker* direction_tracker, 
+        const MonoCalibrationData* mono_calibration,
+        int max_width, int max_height);
+
+    bool loop();
+
+    void renderStereo();
+
+    void renderTarget();
 
     void renderFeatures();
 
     void renderMatches();
+
+    void renderTargetMatches(
+        const std::vector<MonoReprojectionFeature>& features);
 
     void renderPointFeatures(int p);
 
@@ -41,8 +52,6 @@ class DebugRenderer {
     
     void renderText(const std::string& text);
 
-    cv::Mat& debugImage() { return img_ ; }
-
     void selectKeypoint(int x, int y); 
 
   private:
@@ -56,9 +65,13 @@ class DebugRenderer {
     int max_width_, max_height_;
 
     double scale_;
+    int w_, h_;
 
     const FrameProcessor *p1_, *p2_;
     const CrossFrameProcessor* cfp_;
+    const DirectionTracker* dt_;
+    const MonoCalibrationData* mono_calibration_;
+    
     cv::Mat img_;
     std::pair<int, int> selection_;
 };

@@ -43,6 +43,7 @@ class FrameProcessor {
 
     const std::vector<int>& pointKeypoints() const { return point_keypoints_; }
     const std::vector<cv::KeyPoint>& keypoints(int t) const  { return keypoints_[t]; }
+    cv::Mat descriptors(int t) const { return descriptors_[t]; }
     const std::vector<int>& matches(int t) const { return matches_[t]; }
     
   private:

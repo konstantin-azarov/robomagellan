@@ -41,7 +41,7 @@ struct CrossFrameProcessorConfig {
   double inlier_threshold = 3.0;
 };
 
-struct ReprojectionFeatureWithError : public ReprojectionFeature {
+struct ReprojectionFeatureWithError : public StereoReprojectionFeature {
   double error;
 };
 
@@ -128,10 +128,10 @@ class CrossFrameProcessor {
     std::vector<ReprojectionFeatureWithError> all_reprojection_features_;
     std::vector<ReprojectionFeatureWithError> clique_reprojection_features_;
     std::vector<ReprojectionFeatureWithError> filtered_reprojection_features_;
-    std::vector<ReprojectionFeature> tmp_reprojection_features_;
+    std::vector<StereoReprojectionFeature> tmp_reprojection_features_;
     // estimators
     RigidEstimator rigid_estimator_;
-    ReprojectionEstimator reprojection_estimator_;
+    StereoReprojectionEstimator reprojection_estimator_;
 };
 
 #endif

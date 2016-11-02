@@ -3,6 +3,42 @@
 
 #include "calibration_data.hpp"
 
+RawMonoCalibrationData RawMonoCalibrationData::read(
+    const std::string& filename) {
+  RawMonoCalibrationData res;
+
+  cv::FileStorage fs(filename, cv::FileStorage::READ);
+
+  fs["size"] >> res.size;
+  fs["M"] >> res.camera.m;
+  fs["d"] >> res.camera.d;
+
+  return res;
+}
+
+void RawMonoCalibrationData::write(const std::string& filename) {
+  cv::FileStorage fs(filename, cv::FileStorage::WRITE);
+
+  cv::write(fs, "size", size);
+  cv::write(fs, "M", camera.m);
+  cv::write(fs, "d", camera.d);
+}
+
+MonoCalibrationData::MonoCalibrationData(
+    const RawMonoCalibrationData& raw_p,
+    cv::Mat new_m,
+    cv::Size target_size) : raw(raw_p) {
+  cv::initUndistortRectifyMap(
+      raw.camera.m,
+      raw.camera.d,
+      cv::noArray(),
+      new_m,
+      target_size,
+      CV_32FC1,
+      undistort_maps.x,
+      undistort_maps.y);
+}
+
 RawStereoCalibrationData RawStereoCalibrationData::read(
     const std::string& filename) {
   RawStereoCalibrationData res;
@@ -78,8 +114,10 @@ StereoCalibrationData::StereoCalibrationData(
       P2(0, 0) == intrinsics.f && 
       P2(1, 1) == intrinsics.f);
   intrinsics.dr = P2(0, 3); 
-  intrinsics.cxl = P1(0, 2);
-  intrinsics.cxr = P2(0, 2);
+  
+  intrinsics.cx = P1(0, 2);
+  assert(P2(0, 2) == intrinsics.cx);
+
   intrinsics.cy = P1(1, 2);
   assert(P2(1, 2) == intrinsics.cy);
 }

@@ -48,6 +48,8 @@ find_package(Ceres REQUIRED)
 
 find_package(CUDA ${CUDA_VERSION} REQUIRED)
 
+set(CUDA_NVCC_FLAGS -gencode arch=compute_20,code=sm_20 -lineinfo)
+
 find_package(Eigen REQUIRED)
 
 find_package(Boost COMPONENTS program_options filesystem system)
@@ -100,17 +102,80 @@ target_link_libraries(
   clique_test
   ${OpenCV_LIBS})
 
-add_executable(
-  calibrate
-  src/calibrate.cc
-  src/calibration_data.cc
-  src/math3d.cc)
+cuda_add_executable(
+  freak_test
+  src/freak.cc
+  src/freak_base.cc
+  src/freak_gpu.cu
+  src/freak_gpu.cc
+  src/freak_test.cc)
 
 target_link_libraries(
-  calibrate
+  freak_test
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
   dw)
+
+add_library(
+  math3d
+  src/math3d.cc)
+
+catkin_add_gtest(
+  math3d_test
+  src/math3d_test.cc)
+
+target_link_libraries(
+  math3d_test
+  math3d)
+
+target_link_libraries(
+  math3d
+  ${OpenCV_LIBS})
+
+add_executable(
+  calibrate
+  src/calibrate.cc
+  src/calibration_data.cc)
+
+target_link_libraries(
+  calibrate
+  math3d
+  ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
+  dw)
+
+add_executable(
+  mission_editor
+  src/mission_editor.cc
+  src/calibration_data.cc
+  src/direction_target.cc)
+
+target_link_libraries(
+  mission_editor
+  math3d
+  ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
+  dw)
+
+add_library(
+  reprojection_estimator
+  src/reprojection_estimator.cc
+  src/math3d.cc)
+
+target_link_libraries(
+  reprojection_estimator
+  ${CERES_LIBRARIES}
+  ${OpenCV_LIBS})
+
+catkin_add_gtest(
+  reprojection_estimator_test
+  src/reprojection_estimator_test.cc)
+
+target_link_libraries(
+  reprojection_estimator_test
+  reprojection_estimator)
+
+add_test(reprojection_estimator_test reprojection_estimator_test)
 
 add_executable(
   process
@@ -120,22 +185,23 @@ add_executable(
   src/clique.cc
   src/cross_frame_processor.cc
   src/debug_renderer.cc
+  src/direction_target.cc
+  src/direction_tracker.cc
   src/frame_processor.cc
-  src/math3d.cc
   src/raw_video_reader.cc
-  src/reprojection_estimator.cc
   src/rigid_estimator.cc
   src/utils.cc
 )
 
 target_link_libraries(
   process
+  math3d
+  reprojection_estimator
   libdw.so
   ${catkin_LIBRARIES}
   ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY}
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
-  ${CERES_LIBRARIES}
 )
 
 #add_executable(

@@ -42,6 +42,7 @@
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>roscpp</build_depend>
   <build_depend>rospy</build_depend>
+  <build_depend>rostest</build_depend>
   <build_depend>message_generation</build_depend>
   <build_depend>rosconsole</build_depend>
   <build_depend>sensor_msgs</build_depend>

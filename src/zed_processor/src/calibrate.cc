@@ -43,9 +43,19 @@ const int DEBUG_UNDISTORTED = 2;
 
 const int calib_flags = 0; //cv::CALIB_RATIONAL_MODEL;
 
+struct Image {
+  Image(const cv::Mat& data1, const std::string& filename1) : 
+      data(data1), 
+      filename(filename1) {
+  };
+
+  cv::Mat data;
+  std::string filename;
+};
+
 typedef std::vector<cv::Point2f> Corners;
 typedef std::vector<Corners> AllCorners;
-typedef std::vector<cv::Mat> Images;
+typedef std::vector<Image> Images;
 
 Images readImages(const std::string& dir) {
   fs::path path(dir);
@@ -59,11 +69,14 @@ Images readImages(const std::string& dir) {
       ++it) {
     auto f = *it;
 
-    if (f.path().extension() != ".bmp") {
+    if (f.path().extension() != ".bmp" && f.path().extension() != ".jpg") {
       continue;
     }
 
-    res.push_back(cv::imread(f.path().c_str(), cv::IMREAD_GRAYSCALE));
+    res.push_back(
+        Image(
+          cv::imread(f.path().c_str(), cv::IMREAD_GRAYSCALE),
+          f.path().c_str()));
   }
 
   return res;
@@ -73,23 +86,24 @@ std::pair<Images, Images> splitImages(Images images) {
   Images left, right;
 
   for (auto img : images) {
-    int w = img.cols / 2;
-    left.push_back(img.colRange(0, w));
-    right.push_back(img.colRange(w, 2*w));
+    int w = img.data.cols / 2;
+    left.push_back(Image(img.data.colRange(0, w), img.filename + "#left"));
+    right.push_back(Image(img.data.colRange(w, 2*w), img.filename + "#right"));
   }
 
   return make_pair(left, right);
 }
 
-Corners detectCorners(const cv::Mat& image, cv::Size chessboard_size) {
+Corners detectCorners(const Image& image, cv::Size chessboard_size) {
   std::vector<cv::Point2f> corners;
   if (!cv::findChessboardCorners(
-        image, chessboard_size, corners)) {
-    throw CalibrationException("Failed to find chessboard corners");
+        image.data, chessboard_size, corners)) {
+    throw CalibrationException(
+        "Failed to find chessboard corners in " + image.filename);
   }
 
   cv::cornerSubPix(
-      image, 
+      image.data, 
       corners, 
       cv::Size(11, 11), 
       cv::Size(-1, -1), 
@@ -104,14 +118,17 @@ AllCorners detectCorners(
     cv::Size& img_size) {
   AllCorners corners;
 
+  std::cout << "Detecting corners: " << std::endl;
   for (const auto& img : images) {
+  std::cout << "  " << img.filename << std::endl;
     corners.push_back(detectCorners(img, chessboard_size));
 
-    if (img_size.width != 0 && img.size() != img_size) {
+    if (img_size.width != 0 && img.data.size() != img_size) {
       throw CalibrationException("Image size mismatch");
     }
-    img_size = img.size();
+    img_size = img.data.size();
   }
+  std::cout << std::endl;
 
   return corners;
 }
@@ -312,15 +329,14 @@ void drawCross(cv::Mat& img, cv::Point pt, const cv::Scalar& color) {
 }
 
 int main(int argc, char** argv) {
-  std::string snapshots_dir, calib_file;
+  std::string snapshots_dir, calib_file, mono_calib_file;
   cv::Size chessboard_size;
   double chessboard_side_mm;
-  bool mono;
 
   po::options_description desc("Command line options");
   desc.add_options()
-      ("mono",
-       po::bool_switch(&mono)->default_value(false),
+      ("mono-calib-file",
+       po::value(&mono_calib_file)->default_value("data/calib_phone.yml"),
        "calibrate one camera only")
       ("calib-file",
        po::value(&calib_file)->default_value("data/calib.yml"),
@@ -341,21 +357,44 @@ int main(int argc, char** argv) {
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
 
-  if (mono) {
-    /* RawMonoCalibrationData raw_calib; */
+  if (!mono_calib_file.empty()) {
+    StereoCalibrationData stereo_calib(
+        RawStereoCalibrationData::read(calib_file));
+    RawMonoCalibrationData raw_calib;
 
-    /* if (!calibrateCamera( */
-    /*       snapshots_dir, */
-    /*       chessboard_size, */
-    /*       chessboard_side_mm, */
-    /*       0, */
-    /*       raw_calib.size, */
-    /*       raw_calib.camera.m, */
-    /*       raw_calib.camera.d)) { */
-    /*   std::cout << "Failed to calibrate camera" << std::endl; */
-    /*   return 1; */
-    /* } */
+    auto images = readImages(snapshots_dir);
+    auto corners = detectCorners(images, chessboard_size, raw_calib.size);
 
+    double residual = calibrateCamera(
+        raw_calib.size,
+        chessboard_size,
+        chessboard_side_mm,
+        corners,
+        raw_calib.camera);
+
+    std::cout << "Residual: " << residual << std::endl;
+
+    raw_calib.write(calib_file);
+
+    MonoCalibrationData calib(
+        raw_calib, 
+        stereo_calib.Pl.colRange(0, 3),
+        stereo_calib.raw.size);
+
+    cv::namedWindow("debug");
+    for (const auto& img : images) {
+      cv::Mat undistorted;
+
+      cv::remap(
+          img.data, 
+          undistorted, 
+          calib.undistort_maps.x, 
+          calib.undistort_maps.y, 
+          cv::INTER_LINEAR);
+
+      cv::imshow("debug", undistorted);
+      cv::waitKey(0);
+    }
 
   } else {
     RawStereoCalibrationData raw_calib;
@@ -428,14 +467,14 @@ int main(int argc, char** argv) {
       cv::Mat tmp;
 
       cv::remap(
-          stereo_images.first[i], 
+          stereo_images.first[i].data, 
           tmp, 
           calib.undistort_maps[0].x, calib.undistort_maps[0].y, 
           cv::INTER_LINEAR);
       cv::cvtColor(tmp, dbg_left, CV_GRAY2RGB);
 
       cv::remap(
-          stereo_images.second[i], 
+          stereo_images.second[i].data, 
           tmp, 
           calib.undistort_maps[1].x, calib.undistort_maps[1].y, 
           cv::INTER_LINEAR);

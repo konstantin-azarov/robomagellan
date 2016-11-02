@@ -11,14 +11,22 @@ cv::Point3d operator * (const cv::Mat& m, const cv::Point3d& p);
 cv::Point2f projectPoint(const cv::Mat& m, const cv::Point3d& p);
 
 std::pair<cv::Point2d, cv::Point2d> projectPoint(
-    const StereoIntrinsics& i, 
+    const StereoIntrinsics& camera, 
     const cv::Point3d& p);
+
+cv::Point2d projectPoint(const MonoIntrinsics& camera, const cv::Point3d& p);
 
 cv::Mat rotX(double angle);
 
 cv::Mat rotY(double angle);
 
 cv::Mat rotZ(double angle);
+
+/**
+ * Convert a rotation matrix (from current coordinate system to reference 
+ * coordinate system) to yaw/pitch/roll.
+ */
+cv::Vec3d rotToEuler(const cv::Mat& r);
 
 bool compareMats(const cv::Mat& l, const cv::Mat& r, double eps);
 

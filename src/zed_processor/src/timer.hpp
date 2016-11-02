@@ -1,21 +1,48 @@
 #ifndef __TIMER__HPP__
 #define __TIMER__HPP__
 
-#include "utils.hpp"
+#include <chrono>
+#include <sstream>
+#include <vector>
 
 class Timer {
   public:
-    Timer() : t0_(nanoTime()) {}
+    Timer() : t0_(std::chrono::high_resolution_clock::now()) {}
 
-    double mark() { 
-      auto t = nanoTime();
-      auto res = t - t0_;
+    void mark(const char* name) { 
+      auto t = std::chrono::high_resolution_clock::now();
+      log_.push_back(std::make_pair(name, t - t0_));
       t0_ = t;
-      return res;
     }; 
 
+    void advance() {
+      t0_ = std::chrono::high_resolution_clock::now();
+    }
+
+    std::string str() {
+      std::ostringstream os;
+
+      bool sep = false;
+      for (const auto& e : log_) {
+        if (sep) {
+          os << "; ";
+        } else {
+          sep = true;
+        }
+
+        os << e.first << "=" 
+          << std::chrono::duration_cast<std::chrono::milliseconds>(e.second).count();
+      }
+
+      return os.str();
+    }
+
   private:
-    double t0_;
+    std::chrono::high_resolution_clock::time_point t0_;
+    std::vector<
+      std::pair<
+        const char*,
+        std::chrono::high_resolution_clock::duration>> log_;
 };
 
 #endif
