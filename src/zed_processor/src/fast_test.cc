@@ -145,6 +145,8 @@ void validateScores(
   /*   std::cout << std::endl; */
   /* } */
 
+
+  std::cout << "Keypoints: " << cpu_kp.size() << ", " << gpu_kp.size() << std::endl;
   for (int i = 0; i < cpu_kp.size(); ++i) {
     if (gpu_kp[i][0] != cpu_kp[i].pt.x || 
         gpu_kp[i][1] != cpu_kp[i].pt.y ||
@@ -174,8 +176,6 @@ void validateScores(
   /*   } */
   /* } */
 
-  std::cout << "Sizes: " << scores1.rows << " " << scores1.cols << std::endl;
-
   for (int i = 0; i < scores.rows; ++i) {
     for (int j = 0; j < scores.cols; ++j) {
       if (scores(i, j) != scores1(i, j) && scores(i, j) > threshold) {
@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
        po::value<std::string>(&img_file)->required(),
        "path to the image fil")
       ("threshold",
-       po::value<int>(&threshold)->default_value(50),
+       po::value<int>(&threshold)->default_value(25),
        "FAST threshold");
   
   po::variables_map vm;
@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
 
     auto t1 = std::chrono::high_resolution_clock::now();
 
-    std::cout << "Keypoints: " << kp.size() << std::endl;
+    std::cout << "Keypoints: " << kp_gpu.size() << std::endl;
     std::cout << "OpenCV: " 
       << (std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / kIters)
       << "ms" << std::endl;

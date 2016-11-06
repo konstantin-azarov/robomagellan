@@ -19,7 +19,7 @@ struct Match {
 FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
     calib_(&calib),
     fast_(50000),
-    freak_(60) {
+    freak_(64.980350) {
   for (int i=0; i < 2; ++i) {
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
     undistort_map_y_[i].upload(calib_->undistort_maps[i].y);

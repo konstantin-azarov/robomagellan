@@ -133,6 +133,9 @@ bool DebugRenderer::loop() {
         next_frame = true;
         done = true;
         break;
+      case 's':
+        cv::imwrite("/tmp/left.png", p1_->undistortedImage(0));
+        break;
       case 27:
         done = true;
         break;
