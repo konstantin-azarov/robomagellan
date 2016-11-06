@@ -37,12 +37,12 @@ bool CrossFrameProcessor::process(
     int j = matches_[0][i];
     if (j != -1 && matches_[1][j] == i) {
       const auto& kp = p2.keypoints(0)[p2.pointKeypoints()[j]];
-      int bucket = std::floor(kp.pt.y / bucket_h) * config_.x_buckets + 
-        std::floor(kp.pt.x / bucket_w);
-      float score = p1.keypoints(0)[p1.pointKeypoints()[i]].response + 
-                    p1.keypoints(1)[p1.pointKeypoints()[i]].response +  
-                    p2.keypoints(0)[p2.pointKeypoints()[j]].response + 
-                    p2.keypoints(1)[p2.pointKeypoints()[j]].response;
+      int bucket = std::floor(kp.y / bucket_h) * config_.x_buckets + 
+        std::floor(kp.x / bucket_w);
+      float score = p1.keypoints(0)[p1.pointKeypoints()[i]].z + 
+                    p1.keypoints(1)[p1.pointKeypoints()[i]].z +  
+                    p2.keypoints(0)[p2.pointKeypoints()[j]].z + 
+                    p2.keypoints(1)[p2.pointKeypoints()[j]].z;
 
       full_matches_.push_back(
           CrossFrameMatch(points1[i], points2[j], bucket, score, i, j));

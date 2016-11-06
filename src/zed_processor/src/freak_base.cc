@@ -44,6 +44,10 @@ FreakBase::FreakBase(double feature_size)
   buildPatterns_();
 }
 
+int FreakBase::borderWidth() const { 
+  return ceil(feature_size_) + 1;
+}
+
 void FreakBase::buildPatterns_() {
   patterns_.resize(kOrientations * kPoints);
 

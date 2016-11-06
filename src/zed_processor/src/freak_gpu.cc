@@ -74,38 +74,18 @@ FreakGpu::FreakGpu(double feature_size) : FreakBase(feature_size) {
   }
 }
 
-cv::Mat FreakGpu::describe(
-    const cv::Mat& img,
-    const std::vector<cv::KeyPoint>& keypoints) {
+void FreakGpu::describe(
+    const cv::cuda::GpuMat& img,
+    const cv::cuda::GpuMat& keypoints) {
 
-  cv::Mat_<cv::Vec2s> keypoints_cpu(1, keypoints.size());
-  for (int i = 0; i < keypoints.size(); ++i) {
-    keypoints_cpu(0, i) = cv::Vec2s(keypoints[i].pt.x, keypoints[i].pt.y);
-  }
+  cv::cuda::integral(img, integral_);
 
-  cv::cuda::GpuMat img_gpu(img);
-  cv::cudev::GpuMat_<uint> integral_gpu;
-
-  cv::cuda::integral(img_gpu, integral_gpu);
-
-  cv::cuda::GpuMat keypoints_gpu(keypoints_cpu);
-
-  cv::cuda::GpuMat descriptors(keypoints.size(), 512/8, CV_8UC1, cv::Scalar(0));
+  descriptors_.create(keypoints.cols, 512/8, CV_8UC1);
+  descriptors_.setTo(cv::Scalar(0));
 
   freak_gpu::describeKeypointsGpu(
-      integral_gpu, 
-      keypoints_gpu.ptr<short2>(), 
-      keypoints.size(),
-      descriptors);
-
-  cv::Mat res;
-  descriptors.download(res);
-
-  return res;
+      integral_, 
+      keypoints.ptr<short2>(), 
+      keypoints.cols,
+      descriptors_);
 }
-
-/* cv::Mat FreakGpu::describe( */
-/*     const cv::GpuMat& img, */
-/*     const cv::GpuMat& keypoints, */
-/*     const cv::GpuMat& descriptors) { */
-/* } */

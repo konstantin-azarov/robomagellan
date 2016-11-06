@@ -7,6 +7,8 @@ class FreakBase {
   public:
     FreakBase(double feature_size);
 
+    int borderWidth() const;
+
   protected:
     void buildPatterns_();
 

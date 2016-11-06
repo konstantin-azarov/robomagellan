@@ -17,10 +17,9 @@ struct Match {
 };
 
 FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
-    calib_(&calib) {
-  freak_ = cv::xfeatures2d::FREAK::create(true, false);
-      
-
+    calib_(&calib),
+    fast_(50000),
+    freak_(60) {
   for (int i=0; i < 2; ++i) {
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
     undistort_map_y_[i].upload(calib_->undistort_maps[i].y);
@@ -48,13 +47,13 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
    
     keypoints_[i].clear();
 
-    auto fast = cv::cuda::FastFeatureDetector::create(
-        threshold, true, cv::cuda::FastFeatureDetector::TYPE_9_16, 50000);
-    fast->detect(undistorted_image_gpu_[i], keypoints_[i]);
+    fast_.detect(undistorted_image_gpu_[i], threshold);
+    fast_.keypoints().download(keypoints_[i]);
 
     auto t3 = std::chrono::high_resolution_clock::now();
 
-    freak_->compute(undistorted_image_[i], keypoints_[i], descriptors_[i]);
+    freak_.describe(undistorted_image_gpu_[i], fast_.keypoints());
+    freak_.descriptors().download(descriptors_[i]);
 
     auto t4 = std::chrono::high_resolution_clock::now();
 
@@ -64,8 +63,8 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
     }
     
     sort(order_[i].begin(), order_[i].end(), [this, i](int a, int b) -> bool {
-        auto& k1 = keypoints_[i][a].pt;
-        auto& k2 = keypoints_[i][b].pt;
+        auto& k1 = keypoints_[i][a];
+        auto& k2 = keypoints_[i][b];
 
         return (k1.y < k2.y || (k1.y == k2.y && k1.x < k2.x));
     });
@@ -98,12 +97,13 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
   for (int i=0; i < matches_[0].size(); ++i) {
     int j = matches_[0][i];
     if (j != -1 && matches_[1][j] == i) {
-      auto& kp1 = keypoints_[0][i].pt;
-      auto& kp2 = keypoints_[1][j].pt;
+      auto& kp1 = keypoints_[0][i];
+      auto& kp2 = keypoints_[1][j];
 
       if (kp1.x - kp2.x > 0) {
         points_.push_back(
-            cv::Point3d(kp1.x, (kp1.y + kp2.y)/2, std::max(0.0f, kp1.x - kp2.x)));
+            cv::Point3d(
+              kp1.x, (kp1.y + kp2.y)/2, std::max(0.0f, (float)(kp1.x - kp2.x))));
         point_keypoints_.push_back(i);
       }
     }
@@ -120,10 +120,11 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
     << std::endl;
 }
 
-void FrameProcessor::match(const std::vector<cv::KeyPoint>& kps1,
+void FrameProcessor::match(
+           const std::vector<short3>& kps1,
            const std::vector<int>& idx1,
            const cv::Mat& desc1,
-           const std::vector<cv::KeyPoint>& kps2,
+           const std::vector<short3>& kps2,
            const std::vector<int>& idx2,
            const cv::Mat& desc2,
            int inv,
@@ -133,14 +134,14 @@ void FrameProcessor::match(const std::vector<cv::KeyPoint>& kps1,
   int j0 = 0, j1 = 0;
 
   for (int i : idx1) {
-    auto& pt1 = kps1[i].pt;
+    auto& pt1 = kps1[i];
 
     matches[i] = -1;
 
-    while (j0 < kps2.size() && kps2[idx2[j0]].pt.y < pt1.y - 2)
+    while (j0 < kps2.size() && kps2[idx2[j0]].y < pt1.y - 2)
       ++j0;
 
-    while (j1 < kps2.size() && kps2[idx2[j1]].pt.y < pt1.y + 2)
+    while (j1 < kps2.size() && kps2[idx2[j1]].y < pt1.y + 2)
       ++j1;
 
     assert(j1 >= j0);
@@ -150,7 +151,7 @@ void FrameProcessor::match(const std::vector<cv::KeyPoint>& kps1,
 
     for (int jj = j0; jj < j1; jj++) {
       int j = idx2[jj];
-      auto& pt2 = kps2[j].pt;
+      auto& pt2 = kps2[j];
 
       assert(fabs(pt1.y - pt2.y) <= 2);
 

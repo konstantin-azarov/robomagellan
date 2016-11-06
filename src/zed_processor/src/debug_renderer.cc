@@ -185,11 +185,13 @@ void DebugRenderer::renderFeatures() {
       int n = keypoints.size();
 
       for (int i = 0; i < n; ++i) {
-        const auto& pt = keypoints[i].pt;
+        const auto& pt = keypoints[i];
+
+        cv::Point2f p(pt.x, pt.y);
 
         cv::circle(
             img_, 
-            pt + cv::Point2f(w_*t, h_*row), 
+            p + cv::Point2f(w_*t, h_*row), 
             3, 
             cv::Scalar(0, 255, 0));
       }
@@ -385,7 +387,7 @@ void DebugRenderer::selectKeypoint(int u, int v) {
   int best = -1;
   double best_d = 1E+100;
   for (int i=0; i < kps.size(); ++i) {
-    double d = norm2(cv::Point2f(x, y) - kps[i].pt);
+    double d = norm2(cv::Point2f(x, y) - cv::Point2f(kps[i].x, kps[i].y));
     if (d < best_d) {
       best_d = d;
       best = i;
@@ -397,20 +399,21 @@ void DebugRenderer::selectKeypoint(int u, int v) {
     return;
   }
 
-  const auto& kp = kps[best];
+  cv::Point2f kp(kps[best].x, kps[best].y);
 
   std::cout << best << ": " << kp << std::endl;
 
-  auto p1 = kp.pt*scale_ + cv::Point2f(side*w_, frame*h_);
+  auto p1 = kp*scale_ + cv::Point2f(side*w_, frame*h_);
   cv::circle(img_, p1, 3, cv::Scalar(0, 0, 255));
 
   int match = p->matches(side)[best]; 
 
   if (match != -1) {
-    const auto& kp2 = p->keypoints(1-side)[match];
+    const auto& s2 = p->keypoints(1-side)[match];
+    cv::Point2f kp2(s2.x, s2.y);
     std::cout << "match = " << match << ": " << kp2 << std::endl;
 
-    auto p2 = kp2.pt*scale_ + cv::Point2f((1-side)*w_, frame*h_);
+    auto p2 = kp2*scale_ + cv::Point2f((1-side)*w_, frame*h_);
     cv::circle(img_, p2, 3, cv::Scalar(0, 0, 255));
     cv::line(img_, p1, p2, cv::Scalar(0, 0, 255));
 

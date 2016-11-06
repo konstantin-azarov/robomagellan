@@ -116,7 +116,15 @@ int main(int argc, char** argv) {
   /* }; */
 
 //  const cv::Mat_<uint8_t>& desc = (const cv::Mat_<uint8_t>&)freak.describe(img, kp2);
-  cv::Mat gpu_desc = freak_gpu.describe(img, gpu_kp); 
+  cv::Mat_<cv::Vec2s> keypoints_cpu(1, gpu_kp.size());
+  for (int i = 0; i < gpu_kp.size(); ++i) {
+    keypoints_cpu(0, i) = cv::Vec2s(gpu_kp[i].pt.x, gpu_kp[i].pt.y);
+  }
+
+  cv::cuda::GpuMat img_gpu(img);
+  cv::cuda::GpuMat keypoints_gpu(keypoints_cpu);
+  freak_gpu.describe(img_gpu, keypoints_gpu); 
+  auto gpu_desc = freak_gpu.descriptorsCpu();
 
 
   /* std::cout */ 
@@ -183,6 +191,23 @@ int main(int argc, char** argv) {
   std::cout << "Done matching" << std::endl;
 
   if (1) {
+ 
+    const int kIters = 500;
+    auto t0 = std::chrono::high_resolution_clock::now();
+ 
+    for (int t = 0; t < kIters; ++t) {
+      freak_gpu.describe(img_gpu, keypoints_gpu);
+    }
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    std::cout << "Descriptors: " << kp.size() << std::endl;
+    std::cout << "My GPU: " 
+      << (std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / kIters)
+      << "ms" << std::endl;
+  }
+
+  if (0) {
     const int kIters = 500;
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -193,12 +218,12 @@ int main(int argc, char** argv) {
     auto t1 = std::chrono::high_resolution_clock::now();
 
     std::cout << "Descriptors: " << kp.size() << std::endl;
-    std::cout << "My: " 
+    std::cout << "My CPU: " 
       << (std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / kIters)
       << "ms" << std::endl;
   }  
   
-  if (1) {
+  if (0) {
     const int kIters = 500;
     auto t0 = std::chrono::high_resolution_clock::now();
 

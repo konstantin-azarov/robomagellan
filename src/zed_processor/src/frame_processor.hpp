@@ -4,8 +4,12 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/cudafeatures2d.hpp>
+#include <opencv2/cudev/ptr2d/gpumat.hpp>
 #include <opencv2/xfeatures2d.hpp>
 #include <vector>
+
+#include "fast_gpu.hpp"
+#include "freak_gpu.hpp"
 
 struct StereoCalibrationData;
 
@@ -28,7 +32,10 @@ class FrameProcessor {
     const std::pair<cv::Point2f, cv::Point2f> features(int p) const {
       int i = point_keypoints_[p];
       int j = matches_[0][i];
-      return std::make_pair(keypoints_[0][i].pt, keypoints_[1][j].pt);
+
+      cv::Point2f a(keypoints_[0][i].x, keypoints_[0][i].y);
+      cv::Point2f b(keypoints_[1][j].x, keypoints_[1][j].y);
+      return std::make_pair(a, b);
     }
 
 
@@ -42,15 +49,15 @@ class FrameProcessor {
     }
 
     const std::vector<int>& pointKeypoints() const { return point_keypoints_; }
-    const std::vector<cv::KeyPoint>& keypoints(int t) const  { return keypoints_[t]; }
+    const std::vector<short3>& keypoints(int t) const  { return keypoints_[t]; }
     cv::Mat descriptors(int t) const { return descriptors_[t]; }
     const std::vector<int>& matches(int t) const { return matches_[t]; }
     
   private:
-    void match(const std::vector<cv::KeyPoint>& kps1,
+    void match(const std::vector<short3>& kps1,
                const std::vector<int>& idx1,
                const cv::Mat& desc1,
-               const std::vector<cv::KeyPoint>& kps2,
+               const std::vector<short3>& kps2,
                const std::vector<int>& idx2,
                const cv::Mat& desc2,
                int inv,
@@ -59,16 +66,16 @@ class FrameProcessor {
   private:
     const StereoCalibrationData* calib_;
 
-    cv::Ptr<cv::cuda::FastFeatureDetector> fast_;
-    cv::Ptr<cv::xfeatures2d::FREAK> freak_;
+    FastGpu fast_;
+    FreakGpu freak_;
 
     cv::cuda::GpuMat undistort_map_x_[2], undistort_map_y_[2];
-    cv::cuda::GpuMat src_img_[2], undistorted_image_gpu_[2];
+    cv::cudev::GpuMat_<uchar> src_img_[2], undistorted_image_gpu_[2];
 
     cv::Mat undistorted_image_[2];
 
     // [N]: a list of keypoints detected in the left and right image
-    std::vector<cv::KeyPoint> keypoints_[2];
+    std::vector<short3> keypoints_[2];
     // [NxD]: descriptors corresponding to the keypoints_
     cv::Mat descriptors_[2];              
     // [N] keypoints_[t][order_[t][i]] yields keypoints sorted top-to-bottom, 

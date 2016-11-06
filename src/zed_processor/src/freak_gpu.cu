@@ -5,20 +5,20 @@
 #include <opencv2/core/cuda/common.hpp>
 #include <opencv2/cudev/ptr2d/glob.hpp>
 
-const int kNumThreads = 64;
-
-const int kNumPoints = 43;
-const int kNumOrientations = 256;
-const int kNumOrientationPairs = 45;
-const int kNumDescriptorPairs = 512;
-
-const int kKeyPointsPerBlock = 4;
-
-__device__ float3 kPoints[kNumPoints * kNumOrientations];
-__device__ short4 kOrientationPairs[kNumOrientationPairs];
-__device__ short2 kDescriptorPairs[kNumDescriptorPairs];
-
 namespace freak_gpu {
+  const int kNumThreads = 64;
+
+  const int kNumPoints = 43;
+  const int kNumOrientations = 256;
+  const int kNumOrientationPairs = 45;
+  const int kNumDescriptorPairs = 512;
+
+  const int kKeyPointsPerBlock = 2;
+
+  __device__ float3 kPoints[kNumPoints * kNumOrientations];
+  __device__ short4 kOrientationPairs[kNumOrientationPairs];
+  __device__ short2 kDescriptorPairs[kNumDescriptorPairs];
+
   __device__ float computePoint(
       const cv::cudev::GlobPtr<uint> integral_img,
       short2 center,
@@ -202,25 +202,6 @@ namespace freak_gpu {
     cudaDeviceSynchronize();
   }
 
-  __global__ void dumpPoints() {
-    /* printf("GPU points:\n"); */
-    /* for (int i=43; i < 43*2; ++i) { */
-    /*   printf("%f %f %f\n", kPoints[i].x, kPoints[i].y, kPoints[i].z); */
-    /* } */
-
-    /* printf("GPU orientation:\n"); */
-    /* for (int i=0; i < 10; ++i) { */
-    /*   printf("%d %d %d %d\n", */ 
-    /*       kOrientationPairs[i].x, kOrientationPairs[i].y, */
-    /*       kOrientationPairs[i].z, kOrientationPairs[i].w); */
-    /* } */
-
-    /* printf("GPU descriptors:\n"); */
-    /* for (int i=0; i < 10; ++i) { */
-    /*   printf("%d %d\n", kDescriptorPairs[i].x, kDescriptorPairs[i].y); */
-    /* } */
-  }
-
   __host__ bool initialize(
       float3* points, int num_points,
       short4* orientation_pairs, int num_orientation_pairs,
@@ -264,9 +245,6 @@ namespace freak_gpu {
         descriptor_pairs_dev,
         descriptor_pairs, sizeof(short2) * num_descriptor_pairs, 
         cudaMemcpyDefault));
-
-    /* dumpPoints<<<1, 1>>>(); */
-    /* cudaDeviceSynchronize(); */
 
     return true;
   }

@@ -102,16 +102,42 @@ target_link_libraries(
   clique_test
   ${OpenCV_LIBS})
 
-cuda_add_executable(
-  freak_test
+cuda_add_library(
+  freak_gpu
   src/freak.cc
   src/freak_base.cc
   src/freak_gpu.cu
   src/freak_gpu.cc
+)
+
+target_link_libraries(
+  freak_gpu
+  ${OpenCV_LIBS}
+)
+
+add_executable(
+  freak_test
   src/freak_test.cc)
 
 target_link_libraries(
   freak_test
+  freak_gpu
+  ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
+  dw)
+
+cuda_add_library(
+  fast_gpu
+  src/fast_gpu.cc
+  src/fast_gpu.cu)
+
+add_executable(
+  fast_test
+  src/fast_test.cc)
+
+target_link_libraries(
+  fast_test
+  fast_gpu
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
   dw)
@@ -198,6 +224,8 @@ target_link_libraries(
   math3d
   reprojection_estimator
   libdw.so
+  freak_gpu
+  fast_gpu
   ${catkin_LIBRARIES}
   ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY}
   ${OpenCV_LIBS}

@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
   
     img_keypoints.resize(0);
     for (const auto& kp : processor.keypoints(0)) {
-      img_keypoints.push_back(cv::Point2d(kp.pt.x, kp.pt.y));
+      img_keypoints.push_back(cv::Point2d(kp.x, kp.y));
     }
 
     bool dir_found =
