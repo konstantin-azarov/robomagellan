@@ -11,7 +11,7 @@
 namespace freak_gpu {
   extern void describeKeypointsGpu(
       const cv::cudev::GlobPtr<uint> img,
-      const short2* keypoints,
+      const short3* keypoints,
       int num_keypoints,
       cv::cuda::PtrStepSzb descriptors);
 
@@ -85,7 +85,7 @@ void FreakGpu::describe(
 
   freak_gpu::describeKeypointsGpu(
       integral_, 
-      keypoints.ptr<short2>(), 
+      keypoints.ptr<short3>(), 
       keypoints.cols,
       descriptors_);
 }

@@ -116,9 +116,9 @@ int main(int argc, char** argv) {
   /* }; */
 
 //  const cv::Mat_<uint8_t>& desc = (const cv::Mat_<uint8_t>&)freak.describe(img, kp2);
-  cv::Mat_<cv::Vec2s> keypoints_cpu(1, gpu_kp.size());
+  cv::Mat_<cv::Vec3s> keypoints_cpu(1, gpu_kp.size());
   for (int i = 0; i < gpu_kp.size(); ++i) {
-    keypoints_cpu(0, i) = cv::Vec2s(gpu_kp[i].pt.x, gpu_kp[i].pt.y);
+    keypoints_cpu(0, i) = cv::Vec3s(gpu_kp[i].pt.x, gpu_kp[i].pt.y, 0);
   }
 
   cv::cuda::GpuMat img_gpu(img);

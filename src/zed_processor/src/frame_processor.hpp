@@ -66,8 +66,8 @@ class FrameProcessor {
   private:
     const StereoCalibrationData* calib_;
 
-    FastGpu fast_;
     FreakGpu freak_;
+    FastGpu fast_;
 
     cv::cuda::GpuMat undistort_map_x_[2], undistort_map_y_[2];
     cv::cudev::GpuMat_<uchar> src_img_[2], undistorted_image_gpu_[2];

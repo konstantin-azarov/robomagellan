@@ -5,9 +5,11 @@
 #include <opencv2/core/cuda/common.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
+#include <iostream>
+
 class FastGpu {
   public:
-    FastGpu(int max_keypoints);
+    FastGpu(int max_keypoints, int border);
 
     void detect(const cv::cudev::GpuMat_<uchar>& img, int threshold);
 
@@ -23,6 +25,7 @@ class FastGpu {
     cv::cudev::GpuMat_<cv::Vec3s> final_keypoints_;
 
     int keypoint_count_;
+    int border_;
 };
 
 #endif

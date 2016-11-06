@@ -21,7 +21,7 @@ namespace freak_gpu {
 
   __device__ float computePoint(
       const cv::cudev::GlobPtr<uint> integral_img,
-      short2 center,
+      short3 center,
       int pt_index) {
     float cx = center.x + kPoints[pt_index].x;
     float cy = center.y + kPoints[pt_index].y;
@@ -70,13 +70,13 @@ namespace freak_gpu {
 
   __global__ void describeKeypoints(
       const cv::cudev::GlobPtr<uint> integral_img,
-      const short2* keypoints,
+      const short3* keypoints,
       int keypoint_count,
       cv::cuda::PtrStepSzb descriptors) {
 
     __shared__ float all_points[kKeyPointsPerBlock][kNumPoints];
     __shared__ float2 all_orientation_weights[kKeyPointsPerBlock][kNumThreads];
-
+  
     float* points = all_points[threadIdx.y];
     float2* orientation_weight = all_orientation_weights[threadIdx.y];
 
@@ -183,7 +183,7 @@ namespace freak_gpu {
 
   __host__ void describeKeypointsGpu(
       const cv::cudev::GlobPtr<uint> integral_img,
-      const short2* keypoints,
+      const short3* keypoints,
       int keypoint_count,
       cv::cuda::PtrStepSzb descriptors) {
 

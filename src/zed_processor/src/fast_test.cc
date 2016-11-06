@@ -108,7 +108,7 @@ void validateScores(
 
   auto cpu_kp = fast_detect(img, threshold);
 
-  FastGpu fast_gpu(50000);
+  FastGpu fast_gpu(50000, 3);
   fast_gpu.detect(gpu_img, threshold);
 
   cv::Mat_<uint8_t> scores1;
@@ -262,7 +262,7 @@ int main(int argc, char** argv) {
   if (1) {
     const int kIters = 1000;
 
-    FastGpu fast_gpu(50000);
+    FastGpu fast_gpu(50000, 3);
 
     cv::cudev::GpuMat_<uint8_t> scores(img.rows, img.cols);
     scores.setTo(0);

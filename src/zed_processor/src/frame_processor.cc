@@ -18,7 +18,7 @@ struct Match {
 
 FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
     calib_(&calib),
-    fast_(50000),
+    fast_(50000, freak_.borderWidth()),
     freak_(64.980350) {
   for (int i=0; i < 2; ++i) {
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
@@ -53,6 +53,9 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
     auto t3 = std::chrono::high_resolution_clock::now();
 
     freak_.describe(undistorted_image_gpu_[i], fast_.keypoints());
+
+    descriptors_[i].create(freak_.descriptors().size(), CV_8UC1);
+
     freak_.descriptors().download(descriptors_[i]);
 
     auto t4 = std::chrono::high_resolution_clock::now();
