@@ -54,11 +54,20 @@ class FrameProcessor {
     const std::vector<int>& matches(int t) const { return matches_[t]; }
     
   private:
+    static void computeKpPairs_(
+        const std::vector<short3>& kps1,
+        const std::vector<short3>& kps2,
+        std::vector<short2>& keypoint_pairs);
+
+    static void computePairScores_(
+        const cv::Mat_<uchar>& d1,
+        const cv::Mat_<uchar>& d2,
+        const std::vector<short2>& keypoint_pairs,
+        std::vector<short>& scores);
+
     void match(const std::vector<short3>& kps1,
-               const std::vector<int>& idx1,
                const cv::Mat& desc1,
                const std::vector<short3>& kps2,
-               const std::vector<int>& idx2,
                const cv::Mat& desc2,
                int inv,
                std::vector<int>& matches);
@@ -78,11 +87,11 @@ class FrameProcessor {
     std::vector<short3> keypoints_[2];
     // [NxD]: descriptors corresponding to the keypoints_
     cv::Mat descriptors_[2];              
-    // [N] keypoints_[t][order_[t][i]] yields keypoints sorted top-to-bottom, 
-    // left-to-right
-    std::vector<int> order_[2];               
     // [N] keypoint_[t][i] matches keypoint_[1-t][matches_[t][i]]
-    std::vector<int> matches_[2];             
+    std::vector<int> matches_[2];
+    // Descriptor pair candidates to match
+    std::vector<short2> keypoint_pairs_;
+    std::vector<short> keypoint_pair_scores_;
     // points_[match_point_[i]] is extracted from keypoints_[0][i] and 
     // keypoints_[1][matches_[0][i]]
     std::vector<cv::Point3d> points_;

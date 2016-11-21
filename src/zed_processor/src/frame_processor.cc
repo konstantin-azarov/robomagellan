@@ -50,6 +50,14 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
     fast_.detect(undistorted_image_gpu_[i], threshold);
     fast_.keypoints().download(keypoints_[i]);
 
+    sort(
+        keypoints_[i].begin(), keypoints_[i].end(), 
+        [this, i](const short3& a, const short3& b) -> bool {
+          return a.y < b.y || (a.y == b.y && a.x < b.x);
+        });
+
+    fast_.keypoints().upload(keypoints_[i]);
+
     auto t3 = std::chrono::high_resolution_clock::now();
 
     freak_.describe(undistorted_image_gpu_[i], fast_.keypoints());
@@ -60,25 +68,11 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
 
     auto t4 = std::chrono::high_resolution_clock::now();
 
-    order_[i].resize(keypoints_[i].size());
-    for (int j=0; j < order_[i].size(); ++j) {
-      order_[i][j] = j;
-    }
-    
-    sort(order_[i].begin(), order_[i].end(), [this, i](int a, int b) -> bool {
-        auto& k1 = keypoints_[i][a];
-        auto& k2 = keypoints_[i][b];
-
-        return (k1.y < k2.y || (k1.y == k2.y && k1.x < k2.x));
-    });
-
-    auto t5 = std::chrono::high_resolution_clock::now();
     std::cout 
       << " kp = " << keypoints_[i].size()
       << " remap = " << duration_cast<milliseconds>(t2 - t1).count()
       << " detect = " << duration_cast<milliseconds>(t3 - t2).count() 
-      << " extract = " << duration_cast<milliseconds>(t4 - t3).count() 
-      << " sort = " << duration_cast<milliseconds>(t5 - t4).count();
+      << " extract = " << duration_cast<milliseconds>(t4 - t3).count();
   }
 
 
@@ -87,13 +81,14 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
   for (int i=0; i < 2; ++i) {
     int j = 1 - i;
     match(
-        keypoints_[i], order_[i], descriptors_[i],
-        keypoints_[j], order_[j], descriptors_[j],
+        keypoints_[i], descriptors_[i],
+        keypoints_[j], descriptors_[j],
         i ? -1 : 1,
         matches_[i]);
   }
 
   auto t6 = std::chrono::high_resolution_clock::now();
+
 
   points_.resize(0);
   point_keypoints_.resize(0);
@@ -117,34 +112,82 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
   }
 
   auto t7 = std::chrono::high_resolution_clock::now();
+  
+  computeKpPairs_(keypoints_[0], keypoints_[1], keypoint_pairs_);
+
+  auto t8 = std::chrono::high_resolution_clock::now();
+
   std::cout 
     << " match = " << duration_cast<milliseconds>(t6 - t5).count() 
     << " transform = " << duration_cast<milliseconds>(t7 - t6).count() 
+    << " pairs = " << duration_cast<milliseconds>(t8 - t7).count() 
     << std::endl;
 }
 
+void FrameProcessor::computeKpPairs_(
+    const std::vector<short3>& kps1,
+    const std::vector<short3>& kps2,
+    std::vector<short2>& keypoint_pairs) {
+  keypoint_pairs.resize(0);
+  int j0 = 0, j1 = 0;
+  for (int i = 0; i < kps1.size(); ++i) {
+    auto& pt1 = kps1[i];
+
+    while (j0 < kps2.size() && kps2[j0].y < pt1.y - 2)
+      ++j0;
+
+    while (j1 < kps2.size() && kps2[j1].y <= pt1.y + 2)
+      ++j1;
+
+    for (int j = j0; j < j1; j++) {
+      auto& pt2 = kps2[j];
+      assert(fabs(pt1.y - pt2.y) <= 2);
+
+      double dx = pt2.x - pt1.x;
+
+      if (dx > -100 && dx < 100) {
+        keypoint_pairs.push_back(make_short2(i, j));
+      }
+    }
+  }
+}
+
+void FrameProcessor::computePairScores_(
+        const cv::Mat_<uchar>& d1,
+        const cv::Mat_<uchar>& d2,
+        const std::vector<short2>& keypoint_pairs,
+        std::vector<short>& scores) {
+  scores.resize(0);
+
+  for (int i=0; i < keypoint_pairs.size(); ++i) {
+    const auto& p = keypoint_pairs[i];
+
+    
+  }
+}
+
+
 void FrameProcessor::match(
            const std::vector<short3>& kps1,
-           const std::vector<int>& idx1,
            const cv::Mat& desc1,
            const std::vector<short3>& kps2,
-           const std::vector<int>& idx2,
            const cv::Mat& desc2,
            int inv,
            std::vector<int>& matches) {
   matches.resize(kps1.size());
 
   int j0 = 0, j1 = 0;
+  int pairs = 0;
 
-  for (int i : idx1) {
+  for (int i = 0; i < kps1.size(); ++i) {
     auto& pt1 = kps1[i];
 
     matches[i] = -1;
 
-    while (j0 < kps2.size() && kps2[idx2[j0]].y < pt1.y - 2)
+    while (j0 < kps2.size() && kps2[j0].y < pt1.y - 2)
       ++j0;
 
-    while (j1 < kps2.size() && kps2[idx2[j1]].y < pt1.y + 2)
+    while (j1 < kps2.size() && kps2[j1].y <= pt1.y + 2)
       ++j1;
 
     assert(j1 >= j0);
@@ -152,8 +195,7 @@ void FrameProcessor::match(
     double best_d = 1E+15, second_d = 1E+15;
     double best_j = -1;
 
-    for (int jj = j0; jj < j1; jj++) {
-      int j = idx2[jj];
+    for (int j = j0; j < j1; j++) {
       auto& pt2 = kps2[j];
 
       assert(fabs(pt1.y - pt2.y) <= 2);
@@ -168,6 +210,7 @@ void FrameProcessor::match(
         } else if (dist < second_d) {
           second_d = dist;
         }
+        pairs++;
       }
     }
    

@@ -111,8 +111,8 @@ void validateScores(
   FastGpu fast_gpu(50000, 3);
   fast_gpu.detect(gpu_img, threshold);
 
-  cv::Mat_<uint8_t> scores1;
-  fast_gpu.scores().download(scores1);
+  /* cv::Mat_<uint8_t> scores1; */
+  /* fast_gpu.scores().download(scores1); */
 
   std::vector<cv::Vec3s> gpu_kp;
   fast_gpu.keypoints().download(gpu_kp);
@@ -176,16 +176,16 @@ void validateScores(
   /*   } */
   /* } */
 
-  for (int i = 0; i < scores.rows; ++i) {
-    for (int j = 0; j < scores.cols; ++j) {
-      if (scores(i, j) != scores1(i, j) && scores(i, j) > threshold) {
-        std::cout << "Mismatch @(" 
-          << i << ", " << j << ")"
-          << (int)scores(i, j) << " " << (int)scores1(i, j) << std::endl;
-        return;
-      }
-    }
-  }
+  /* for (int i = 0; i < scores.rows; ++i) { */
+  /*   for (int j = 0; j < scores.cols; ++j) { */
+  /*     if (scores(i, j) != scores1(i, j) && scores(i, j) > threshold) { */
+  /*       std::cout << "Mismatch @(" */ 
+  /*         << i << ", " << j << ")" */
+  /*         << (int)scores(i, j) << " " << (int)scores1(i, j) << std::endl; */
+  /*       return; */
+  /*     } */
+  /*   } */
+  /* } */
 
   std::cout << "Done!" << std::endl;
 }

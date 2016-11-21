@@ -13,7 +13,6 @@ class FastGpu {
 
     void detect(const cv::cudev::GpuMat_<uchar>& img, int threshold);
 
-    const cv::cudev::GpuMat_<uint8_t>& scores() const { return scores_; }
     cv::cudev::GpuMat_<cv::Vec3s> keypoints() const { 
       return final_keypoints_.colRange(0, keypoint_count_); 
     }
