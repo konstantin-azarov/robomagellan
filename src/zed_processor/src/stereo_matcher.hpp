@@ -12,8 +12,8 @@ namespace stereo_matcher {
       const cv::cudev::GpuMat_<uchar>& d2,
       const cv::cudev::GpuMat_<cv::Vec2s>& pairs,
       float threshold_ratio,
-      cv::cudev::GpuMat_<cv::Vec4s>& m1,
-      cv::cudev::GpuMat_<cv::Vec4s>& m2,
+      cv::cudev::GpuMat_<cv::Vec4w>& m1,
+      cv::cudev::GpuMat_<cv::Vec4w>& m2,
       cv::cudev::GpuMat_<cv::Vec2s>& m);
 
 }

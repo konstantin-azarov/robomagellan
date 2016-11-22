@@ -28,12 +28,13 @@ namespace stereo_matcher {
       uint tid = threadIdx.x;
 
       ushort2 p = pairs[pair_id];
-      short b1 = *(reinterpret_cast<const short*>(d1.row(p.x)) + tid);
-      short b2 = *(reinterpret_cast<const short*>(d2.row(p.y)) + tid);
+
+      ushort b1 = *(reinterpret_cast<const ushort*>(d1.row(p.x)) + tid);
+      ushort b2 = *(reinterpret_cast<const ushort*>(d2.row(p.y)) + tid);
 
       scores[tid] = __popc(b1 ^ b2);
-    }
-    
+   }
+
     __syncthreads();
 
     if (pair_id < n_pairs) {
@@ -42,12 +43,18 @@ namespace stereo_matcher {
         if (tid < s) {
           scores[tid] += scores[tid + s];
         }
+        
+        __syncthreads();
       }
     }
 
-    __syncthreads();
-
     uint score = scores[0];
+   
+    /* if (tid == 0 && pair_id < n_pairs) { */
+    /*   printf("P%d, %d: %d %d %d\n", pair_id, tid, p.x, p.y, score); */
+    /* } */
+
+    return;
 
     if (pair_id < n_pairs && tid <= 1) {
       ushort i = tid == 0 ? p.x : p.y;
@@ -56,11 +63,11 @@ namespace stereo_matcher {
         reinterpret_cast<unsigned long long*>(tid == 0 ? m1 : m2) + i;
 
 
-      const unsigned long long old_v = *m;
-      unsigned long long new_v;
-
       bool ok = false;
       do {
+        unsigned long long old_v = *m;
+        unsigned long long new_v;
+
         const ushort4& old_entry = *reinterpret_cast<const ushort4*>(&old_v);
         ushort4& new_entry = *reinterpret_cast<ushort4*>(&new_v);
         bool updated = false;
@@ -72,7 +79,9 @@ namespace stereo_matcher {
           updated = true;
         }
 
-        ok = updated ? atomicCAS(m, old_v, new_v) == old_v : true;
+//        ok = updated ? atomicCAS(m, old_v, new_v) == old_v : true;
+        *m = new_v;
+        ok = true;
       } while (!ok);
     }
   }
@@ -96,12 +105,12 @@ namespace stereo_matcher {
     cudaSafeCall(cudaMemset(m1, 0xff, n1*sizeof(ushort4)));
     cudaSafeCall(cudaMemset(m2, 0xff, n2*sizeof(ushort4)));
 
-    match<<<n_pairs/kPairsPerBlock, dim3(32, kPairsPerBlock)>>>(
+    int n_blocks = (n_pairs + kPairsPerBlock - 1) / kPairsPerBlock;
+
+    match<<<n_blocks, dim3(32, kPairsPerBlock)>>>(
         d1, d2, pairs, n_pairs, m1, m2);
 
     cudaSafeCall(cudaGetLastError());
-
-    cudaDeviceSynchronize();
 
     return 0;
   }
