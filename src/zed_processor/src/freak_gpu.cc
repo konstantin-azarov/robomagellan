@@ -1,7 +1,5 @@
 #include <iostream>
 
-#include <cuda_runtime.h>
-
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 #include <opencv2/cudaarithm.hpp>
@@ -34,24 +32,6 @@ FreakGpu::FreakGpu(double feature_size) : FreakBase(feature_size) {
     for (const auto& p : patterns_) {
       points.push_back(make_float3(p.x, p.y, p.sigma));
     }
-
-    /* std::cout << "CPU points:" << std::endl; */
-    /* for (int i=43; i < 43*2; ++i) { */
-    /*   auto p = patterns_[i]; */
-    /*   std::cout << p.x <<  " " << p.y << " " << p.sigma << std::endl; */
-    /* } */
-
-    /* printf("CPU orientation:\n"); */
-    /* for (int i=0; i < 10; ++i) { */
-    /*   printf("%d %d %d %d\n", */ 
-    /*       orientation_pairs_[i].i, orientation_pairs_[i].j, */
-    /*       orientation_pairs_[i].dx, orientation_pairs_[i].dy); */
-    /* } */
-
-    /* printf("GPU descriptors:\n"); */
-    /* for (int i=0; i < 10; ++i) { */
-    /*   printf("%d %d\n", descriptor_pairs_[i].i, descriptor_pairs_[i].j); */
-    /* } */
 
     for (const auto& p : orientation_pairs_) {
       if (p.dx > (1 << 15) || p.dx < -(1 << 15) ||

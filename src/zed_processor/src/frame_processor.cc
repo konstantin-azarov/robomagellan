@@ -12,10 +12,6 @@
 
 using namespace std::chrono;
 
-struct Match {
-  int leftIndex, rightIndex;
-};
-
 FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
     calib_(&calib),
     fast_(50000, freak_.borderWidth()),
@@ -24,6 +20,11 @@ FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) :
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
     undistort_map_y_[i].upload(calib_->undistort_maps[i].y);
   }
+}
+
+std::ostream& operator << (std::ostream& s, ushort4 v) {
+  s << "(" << v.x << ", " << v.y << ", " << v.z << ", " << v.w << ")";
+  return s;
 }
 
 void FrameProcessor::process(const cv::Mat src[], int threshold) {
@@ -75,26 +76,19 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
       << " extract = " << duration_cast<milliseconds>(t4 - t3).count();
   }
 
-
   auto t5 = std::chrono::high_resolution_clock::now();
 
-  for (int i=0; i < 2; ++i) {
-    int j = 1 - i;
-    match(
-        keypoints_[i], descriptors_[i],
-        keypoints_[j], descriptors_[j],
-        i ? -1 : 1,
-        matches_[i]);
-  }
+  computeKpPairs_(keypoints_[0], keypoints_[1], keypoint_pairs_);
+
+  computeMatches_(descriptors_[0], descriptors_[1], keypoint_pairs_, matches_);
 
   auto t6 = std::chrono::high_resolution_clock::now();
-
 
   points_.resize(0);
   point_keypoints_.resize(0);
   for (int i=0; i < matches_[0].size(); ++i) {
-    int j = matches_[0][i];
-    if (j != -1 && matches_[1][j] == i) {
+    int j = matches_[0][i].z;
+    if (j != 0xFFFF && matches_[1][j].z == i) {
       auto& kp1 = keypoints_[0][i];
       auto& kp2 = keypoints_[1][j];
 
@@ -113,14 +107,12 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
 
   auto t7 = std::chrono::high_resolution_clock::now();
   
-  computeKpPairs_(keypoints_[0], keypoints_[1], keypoint_pairs_);
-
-  auto t8 = std::chrono::high_resolution_clock::now();
-
-  std::cout 
+  std::cout
+    << " n_pairs = " << keypoint_pairs_.size()
+    << " n_points = " << points_.size()
     << " match = " << duration_cast<milliseconds>(t6 - t5).count() 
     << " transform = " << duration_cast<milliseconds>(t7 - t6).count() 
-    << " pairs = " << duration_cast<milliseconds>(t8 - t7).count() 
+    << " total = " << duration_cast<milliseconds>(t7 - t0).count()
     << std::endl;
 }
 
@@ -152,20 +144,49 @@ void FrameProcessor::computeKpPairs_(
   }
 }
 
-void FrameProcessor::computePairScores_(
+
+
+void FrameProcessor::computeMatches_(
         const cv::Mat_<uchar>& d1,
         const cv::Mat_<uchar>& d2,
         const std::vector<short2>& keypoint_pairs,
-        std::vector<short>& scores) {
-  scores.resize(0);
+        std::vector<ushort4> matches[2]) {
+  matches[0].resize(d1.rows);
+  std::fill(matches[0].begin(), matches[0].end(), make_ushort4(0xffff, 0xffff, 0xffff, 0));
+  matches[1].resize(d2.rows);
+  std::fill(matches[1].begin(), matches[1].end(), make_ushort4(0xffff, 0xffff, 0xffff, 0));
 
   for (int i=0; i < keypoint_pairs.size(); ++i) {
     const auto& p = keypoint_pairs[i];
+    int score = descriptorDist(d1.row(p.x), d2.row(p.y));
+    {
+      ushort4 m = matches[0][p.x];
+      if (score < m.x) {
+        matches[0][p.x] = make_ushort4(score, m.x, p.y, 0);
+      } else if (score < m.y) {
+        matches[0][p.x] = make_ushort4(m.x, score, m.z, 0);
+      }
+    }
+    {
+      ushort4 m = matches[1][p.y];
+      if (score < m.x) {
+        matches[1][p.y] = make_ushort4(score, m.x, p.x, 0);
+      } else if (score < m.y) {
+        matches[1][p.y] = make_ushort4(m.x, score, m.z, 0);
+      }
+    }
+  }
 
-    
+  for (int t = 0; t < 2; ++t) {
+    for (auto& m : matches[t]) {
+      if (m.x != 0xFFFF) {
+        if (m.x / static_cast<double>(m.y) >= 0.8) {
+          m.z = 0xFFFF;
+        }
+      }
+    }
   }
 }
-
 
 void FrameProcessor::match(
            const std::vector<short3>& kps1,
@@ -205,6 +226,7 @@ void FrameProcessor::match(
       if (dx > -100 && dx < 100) {
         double dist = descriptorDist(desc1.row(i), desc2.row(j));
         if (dist < best_d) {
+          second_d = best_d;
           best_d = dist;
           best_j = j;
         } else if (dist < second_d) {

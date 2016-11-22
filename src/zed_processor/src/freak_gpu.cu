@@ -198,8 +198,6 @@ namespace freak_gpu {
         descriptors);
 
     cudaSafeCall(cudaGetLastError());
-
-    cudaDeviceSynchronize();
   }
 
   __host__ bool initialize(

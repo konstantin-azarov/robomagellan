@@ -142,6 +142,23 @@ target_link_libraries(
   ${Boost_LIBRARIES}
   dw)
 
+cuda_add_library(
+  stereo_matcher
+  src/stereo_matcher.cc
+  src/stereo_matcher.cu)
+
+add_executable(
+  stereo_matcher_test
+  src/stereo_matcher_test.cc)
+
+target_link_libraries(
+  stereo_matcher_test
+  stereo_matcher
+  math3d
+  ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
+  dw)
+
 add_library(
   math3d
   src/math3d.cc)

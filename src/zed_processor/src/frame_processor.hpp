@@ -31,7 +31,7 @@ class FrameProcessor {
     // corresponding point.
     const std::pair<cv::Point2f, cv::Point2f> features(int p) const {
       int i = point_keypoints_[p];
-      int j = matches_[0][i];
+      int j = matches_[0][i].z;
 
       cv::Point2f a(keypoints_[0][i].x, keypoints_[0][i].y);
       cv::Point2f b(keypoints_[1][j].x, keypoints_[1][j].y);
@@ -43,7 +43,7 @@ class FrameProcessor {
     // corresponding point.
     const std::pair<cv::Mat, cv::Mat> pointDescriptors(int p) const {
       int i = point_keypoints_[p];
-      int j = matches_[0][i];
+      int j = matches_[0][i].z;
 
       return std::make_pair(descriptors_[0].row(i), descriptors_[1].row(j));
     }
@@ -51,7 +51,13 @@ class FrameProcessor {
     const std::vector<int>& pointKeypoints() const { return point_keypoints_; }
     const std::vector<short3>& keypoints(int t) const  { return keypoints_[t]; }
     cv::Mat descriptors(int t) const { return descriptors_[t]; }
-    const std::vector<int>& matches(int t) const { return matches_[t]; }
+    std::vector<int> matches(int t) const { 
+      std::vector<int> res;
+      for (const auto& m : matches_[t]) {
+        res.push_back(m.z == 0xFFFF ? -1 : m.z);
+      }
+      return res;
+    }
     
   private:
     static void computeKpPairs_(
@@ -59,11 +65,17 @@ class FrameProcessor {
         const std::vector<short3>& kps2,
         std::vector<short2>& keypoint_pairs);
 
-    static void computePairScores_(
+    /**
+     * d1 - left descriptors
+     * d2 - right descriptors
+     * keypoint_pairs - potential matches (left_index, right_index)
+     * matches[t][i] = (best_score, second_best_score, best_index)
+     */
+    static void computeMatches_(
         const cv::Mat_<uchar>& d1,
         const cv::Mat_<uchar>& d2,
         const std::vector<short2>& keypoint_pairs,
-        std::vector<short>& scores);
+        std::vector<ushort4> matches[2]);
 
     void match(const std::vector<short3>& kps1,
                const cv::Mat& desc1,
@@ -84,14 +96,14 @@ class FrameProcessor {
     cv::Mat undistorted_image_[2];
 
     // [N]: a list of keypoints detected in the left and right image
+    // each keypoint is represented as x, y, reponse
     std::vector<short3> keypoints_[2];
     // [NxD]: descriptors corresponding to the keypoints_
     cv::Mat descriptors_[2];              
     // [N] keypoint_[t][i] matches keypoint_[1-t][matches_[t][i]]
-    std::vector<int> matches_[2];
+    std::vector<ushort4> matches_[2];
     // Descriptor pair candidates to match
     std::vector<short2> keypoint_pairs_;
-    std::vector<short> keypoint_pair_scores_;
     // points_[match_point_[i]] is extracted from keypoints_[0][i] and 
     // keypoints_[1][matches_[0][i]]
     std::vector<cv::Point3d> points_;
