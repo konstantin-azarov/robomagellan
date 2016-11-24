@@ -1,8 +1,6 @@
-#define CATCH_CONFIG_MAIN
+#include <gtest/gtest.h>
 
 #include <opencv2/opencv.hpp>
-
-#include <gtest/gtest.h>
 
 #include "math3d.hpp"
 

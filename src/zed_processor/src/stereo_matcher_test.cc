@@ -2,8 +2,12 @@
 #include <iostream>
 #include <random>
 
+#include <benchmark/benchmark.h>
+#include <gtest/gtest.h>
+
 #include <opencv2/core.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
+
 
 #define BACKWARD_HAS_DW 1
 #include "backward.hpp"
@@ -16,7 +20,7 @@ backward::SignalHandling sh;
 cv::Mat_<uchar> randomDescriptors(int n) {
   cv::Mat_<uchar> res(n, 64);
 
-  std::default_random_engine rand;
+  std::default_random_engine rand(0);
   std::uniform_int_distribution<> dist(0, 0xFFFF);
 
   for (int i = 0; i < n; ++i) {
@@ -42,156 +46,275 @@ std::vector<cv::Vec2s> randomPairs(int n_descs, int n_pairs) {
     res.push_back(cv::Vec2s(i, j));
   }
 
+  std::sort(
+      std::begin(res), std::end(res), 
+      [](const cv::Vec2d& a, const cv::Vec2d& b) {
+        return a[0] != b[0] ? a[0] < b[0] : a[1] < b[1];
+      });
+
+  res.erase(std::unique(std::begin(res), std::end(res)), std::end(res));
+
   return res;
 }
 
-void naiveMatch(
+std::vector<cv::Vec2s> computeMatches(
     const cv::Mat_<uchar>& d1,
     const cv::Mat_<uchar>& d2,
     const std::vector<cv::Vec2s>& pairs,
-    std::vector<cv::Vec4w>& m1,
-    std::vector<cv::Vec4w>& m2,
-    std::vector<cv::Vec2s>& m) {
-  m1.resize(d1.rows);
-  std::fill(m1.begin(), m1.end(), cv::Vec4w(0xffff, 0xffff, 0xffff, 0xffff));
-  m2.resize(d2.rows);
-  std::fill(m2.begin(), m2.end(), cv::Vec4w(0xffff, 0xffff, 0xffff, 0xffff));
+    float threshold_ratio) {
+  int n1 = d1.rows, n2 = d2.rows;
 
-  for (const auto& p : pairs) {
-    int score = descriptorDist(d1.row(p[0]), d2.row(p[1]));
-    /* std::cout << "P: " << p[0] << ", " << p[1] << ", " << score << std::endl; */
-    {
-      cv::Vec4w m = m1[p[0]];
-      if (score < m[0]) {
-        m1[p[0]] = cv::Vec4w(score, m[0], p[1], 0);
-      } else if (score < m[1]) {
-        m1[p[0]] = cv::Vec4w(m[0], score, m[2], 0);
+  const int kMax = 500000000;
+
+  cv::Mat_<int> scores(n1, n2, kMax);
+  
+  for (auto p : pairs) {
+    int s = descriptorDist(d1.row(p[0]), d2.row(p[1]));
+    scores(p[0], p[1]) = s;
+  }
+
+  /* std::cout << "Scores: " << scores << std::endl; */  
+
+  std::vector<int> m1(n1, -1), m2(n2, -1);
+
+  auto fill_matches = [&](std::vector<int>& m, cv::Mat_<int> scores) {
+    ASSERT_EQ(m.size(), scores.rows);
+    for (int i=0; i < scores.rows; ++i) {
+      std::vector<cv::Vec2i> row(scores.cols);
+      for (int j = 0; j < scores.cols; ++j) {
+        row[j] = { scores(i, j), j };
+      }
+
+      std::sort(std::begin(row), std::end(row), [](cv::Vec2i a, cv::Vec2i b) {
+        return a[0] < b[0];
+      });
+
+      /* std::cout << "Row(" << i << "): " << cv::Mat_<cv::Vec2i>(row) << std::endl; */
+
+      if (row[0][0] != kMax && 
+          row[1][0]*threshold_ratio > row[0][0]) {
+        m[i] = row[0][1];
       }
     }
-    {
-      cv::Vec4w m = m2[p[1]];
-      if (score < m[0]) {
-        m2[p[1]] = cv::Vec4w(score, m[0], p[0], 0);
-      } else if (score < m[1]) {
-        m2[p[1]] = cv::Vec4w(m[0], score, m[2], 0);
-      }
+  };
+
+  fill_matches(m1, scores);
+  fill_matches(m2, scores.t());
+
+  /* std::cout << "m1: " << cv::Mat_<int>(m1) << std::endl; */
+  /* std::cout << "m2: " << cv::Mat_<int>(m2) << std::endl; */
+
+  std::vector<cv::Vec2s> res;
+  for (int i = 0; i < n1; ++i) {
+    if (m1[i] != -1 && m2[m1[i]] == i) {
+      res.push_back(cv::Vec2s(i, m1[i]));
     }
   }
 
-  /* for (int t = 0; t < 2; ++t) { */
-  /*   for (auto& m : matches[t]) { */
-  /*     if (m.x != 0xFFFF) { */
-  /*       if (m.x / static_cast<double>(m.y) >= 0.8) { */
-  /*         m.z = 0xFFFF; */
-  /*       } */
-  /*     } */
-  /*   } */
-  /* } */
+  return res;
+}
+  
+TEST(StereoMatcherTest, random) {
+  const int kMaxDescs = 10000;
+  const int kMaxPairs = 100000;
+  
+  Matcher matcher(kMaxDescs, kMaxPairs);
+
+  std::tuple<int, int, int> tests[] = {
+    std::make_tuple(10, 10, 1),
+    std::make_tuple(10, 45, 1),
+    std::make_tuple(1000, 1000, 5),
+    std::make_tuple(1000, 50000, 10),
+    std::make_tuple(10000, 100000, 1)
+  };
+
+  for (auto test : tests) {
+    int ndescs = std::get<0>(test);
+    int npairs = std::get<1>(test);
+    int niters = std::get<2>(test);
+
+    for (int t = 0; t < niters; ++t) {
+      cv::Mat_<uchar> d1 = randomDescriptors(ndescs);
+      cv::Mat_<uchar> d2 = randomDescriptors(ndescs);
+      std::vector<cv::Vec2s> pairs = randomPairs(ndescs, npairs);
+
+      auto res = matcher.match(
+          cv::cudev::GpuMat_<uint8_t>(d1), 
+          cv::cudev::GpuMat_<uint8_t>(d2),
+          cv::cudev::GpuMat_<cv::Vec2s>(pairs), 
+          pairs, 0.8);
+
+      auto golden = computeMatches(d1, d2, pairs, 0.8);
+
+      /* std::cout << cv::Mat_<cv::Vec2s>(golden) << std::endl; */
+
+      ASSERT_EQ(golden, res) << ndescs << ", " << npairs << ", " << t;
+    }
+  }
 }
 
-bool compare(const std::vector<cv::Vec4w> v1,
-             const std::vector<cv::Vec4w> v2) {
-  if (v1.size() != v2.size()) {
-    std::cout << "Size mismatch" << std::endl;
-    return false;
-  }
+class MatcherBenchmarkFixture : public benchmark::Fixture {
+  public:
+    const int kDescs = 10000;
+    const int kPairs = 100000;
 
-  for (int i=0; i < v1.size(); ++i) {
-    if (v1[i] != v2[i]) {
-      std::cout << "Mismatch at " << i << ": " 
-        << v1[i] << " != " << v2[i] << std::endl;
-      return false;
+    MatcherBenchmarkFixture() : matcher_(kDescs, kPairs) {
     }
-  }
 
-  return true;
+    virtual void SetUp(const benchmark::State&) {
+      d1_.upload(randomDescriptors(kDescs));
+      d2_.upload(randomDescriptors(kDescs));
+      pairs_cpu_ =randomPairs(kDescs, kPairs);
+      pairs_gpu_.upload(pairs_cpu_);
+      matcher_.match(d1_, d2_, pairs_gpu_, pairs_cpu_, 0.8);
+    }
+
+  protected:
+    Matcher matcher_;
+    cv::cudev::GpuMat_<uint8_t> d1_, d2_;
+    std::vector<cv::Vec2s> pairs_cpu_;
+    cv::cudev::GpuMat_<cv::Vec2s> pairs_gpu_;
+};
+
+BENCHMARK_F(MatcherBenchmarkFixture, Full)(benchmark::State& st) {
+  while (st.KeepRunning()) {
+    matcher_.match(d1_, d2_, pairs_gpu_, pairs_cpu_, 0.8);
+  }
+}
+
+BENCHMARK_DEFINE_F(MatcherBenchmarkFixture, Gpu)(benchmark::State& st) {
+  while (st.KeepRunning()) {
+    matcher_.computeScores(d1_, d2_, pairs_gpu_);
+    cudaDeviceSynchronize();
+  }
+}
+
+BENCHMARK_REGISTER_F(MatcherBenchmarkFixture, Gpu);//->UseRealTime();
+
+BENCHMARK_F(MatcherBenchmarkFixture, Cpu)(benchmark::State& st) {
+  while (st.KeepRunning()) {
+    matcher_.gatherMatches(d1_.rows, d2_.rows, pairs_cpu_, 0.8);
+  }
 }
 
 int main(int argc, char** argv) {
-  const int kNDescs = 5000;
-  const int kNPairs = 100000;
-
-  cv::Mat_<uchar> d1 = randomDescriptors(kNDescs);
-  cv::Mat_<uchar> d2 = randomDescriptors(kNDescs);
-  std::vector<cv::Vec2s> pairs = randomPairs(kNDescs, kNPairs);
-
-  sort(pairs.begin(), pairs.end(), [](const cv::Vec2s& a, const cv::Vec2s&b) {
-    return a[0] != b[0] ? a[0] < b[0] : a[1] < b[1];
-  });
-
-  std::vector<cv::Vec4w> m1, m2;
-  std::vector<cv::Vec2s> m;
-
-  naiveMatch(d1, d2, pairs, m1, m2, m);
-
-  cv::cudev::GpuMat_<uchar> d1_gpu(d1);
-  cv::cudev::GpuMat_<uchar> d2_gpu(d2);
-  cv::cudev::GpuMat_<cv::Vec2s> pairs_gpu(pairs);
-  cv::cudev::GpuMat_<cv::Vec4w> m1_gpu(1, d1.rows);
-  cv::cudev::GpuMat_<cv::Vec4w> m2_gpu(1, d2.rows);
-  cv::cudev::GpuMat_<cv::Vec2s> m_gpu(1, d1.rows);
-
-  stereo_matcher::match(d1_gpu, d2_gpu, pairs_gpu, 0.8, m1_gpu, m2_gpu, m_gpu);
-
-  std::vector<cv::Vec4w> m1_cpu, m2_cpu;
-  m1_gpu.download(m1_cpu);
-  m2_gpu.download(m2_cpu);
-
-  /* std::cout << "Comparing m1" << std::endl; */
-  /* if (!compare(m1, m1_cpu)) { */
-  /*   return 1; */
-  /* } */
-
-  /* std::cout << "Comparing m2" << std::endl; */
-  /* if (!compare(m2, m2_cpu)) { */
-  /*   return 1; */
-  /* } */
-
-  std::cout << "OK" << std::endl;
-
-  if (0) {
-    const int kIters = 100;
-
-    for (int t = 0; t < 100; ++t) {
-      naiveMatch(d1, d2, pairs, m1, m2, m);
-    }
-
-    auto t0 = std::chrono::high_resolution_clock::now();
-
-
-    for (int t = 0; t < kIters; ++t) {
-      naiveMatch(d1, d2, pairs, m1, m2, m);
-    }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    std::cout << "CPU: " 
-      << (std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / kIters)
-      << "us" << std::endl;
+  if (argc >= 2 && std::string(argv[1]) == "benchmark") {
+    benchmark::Initialize(&argc, argv);
+    benchmark::RunSpecifiedBenchmarks();
+    return 0;
+  } else {
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
   }
-
-  if (1) {
-    const int kIters = 100;
-
-    for (int t = 0; t < 100; ++t) {
-      stereo_matcher::match(d1_gpu, d2_gpu, pairs_gpu, 0.8, m1_gpu, m2_gpu, m_gpu);
-      cudaDeviceSynchronize();
-    }
-
-    auto t0 = std::chrono::high_resolution_clock::now();
-
-
-    for (int t = 0; t < kIters; ++t) {
-      stereo_matcher::match(d1_gpu, d2_gpu, pairs_gpu, 0.8, m1_gpu, m2_gpu, m_gpu);
-      cudaDeviceSynchronize();
-    }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    std::cout << "GPU: " 
-      << (std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / kIters)
-      << "us" << std::endl;
-  }
-
-  return 0;
 }
+
+
+/* template <class T> */
+/* bool compare(const std::vector<T> v1, */
+/*              const std::vector<T> v2) { */
+/*   if (v1.size() != v2.size()) { */
+/*     std::cout << "Size mismatch" << std::endl; */
+/*     return false; */
+/*   } */
+
+/*   for (int i=0; i < v1.size(); ++i) { */
+/*     if (v1[i] != v2[i]) { */
+/*       std::cout << "Mismatch at " << i << ": " */ 
+/*         << v1[i] << " != " << v2[i] << std::endl; */
+/*       return false; */
+/*     } */
+/*   } */
+
+/*   return true; */
+/* } */
+
+/* int main(int argc, char** argv) { */
+/*   const int kNDescs = 5000; */
+/*   const int kNPairs = 100000; */
+
+/*   cv::Mat_<uchar> d1 = randomDescriptors(kNDescs); */
+/*   cv::Mat_<uchar> d2 = randomDescriptors(kNDescs); */
+/*   std::vector<cv::Vec2s> pairs = randomPairs(kNDescs, kNPairs); */
+
+/*   sort(pairs.begin(), pairs.end(), [](const cv::Vec2s& a, const cv::Vec2s&b) { */
+/*     return a[0] != b[0] ? a[0] < b[0] : a[1] < b[1]; */
+/*   }); */
+
+/*   std::vector<cv::Vec4w> m1, m2; */
+/*   std::vector<cv::Vec2s> m; */
+/*   std::vector<ushort> scores; */
+
+/*   twoStepMatch(d1, d2, pairs, scores, m1, m2); */
+
+/*   cv::cudev::GpuMat_<uchar> d1_gpu(d1); */
+/*   cv::cudev::GpuMat_<uchar> d2_gpu(d2); */
+/*   cv::cudev::GpuMat_<cv::Vec2s> pairs_gpu(pairs); */
+/*   cv::cudev::GpuMat_<ushort> scores_gpu(1, pairs_gpu.cols); */
+
+/*   stereo_matcher::scores(d1_gpu, d2_gpu, pairs_gpu, scores_gpu); */
+
+/*   std::vector<ushort> scores_cpu; */
+/*   scores_gpu.download(scores_cpu); */
+
+/*   std::cout << "Comparing scores" << std::endl; */
+/*   compare(scores, scores_cpu); */ 
+
+/*   /1* std::cout << "Comparing m1" << std::endl; *1/ */
+/*   /1* if (!compare(m1, m1_cpu)) { *1/ */
+/*   /1*   return 1; *1/ */
+/*   /1* } *1/ */
+
+/*   /1* std::cout << "Comparing m2" << std::endl; *1/ */
+/*   /1* if (!compare(m2, m2_cpu)) { *1/ */
+/*   /1*   return 1; *1/ */
+/*   /1* } *1/ */
+
+/*   std::cout << "OK" << std::endl; */
+
+/*   if (0) { */
+/*     const int kIters = 100; */
+
+/*     for (int t = 0; t < 20; ++t) { */
+/*       twoStepMatch(d1, d2, pairs, scores, m1, m2); */
+/*     } */
+
+/*     auto t0 = std::chrono::high_resolution_clock::now(); */
+
+
+/*     for (int t = 0; t < kIters; ++t) { */
+/* //      twoStepMatch(d1, d2, pairs, scores, m1, m2); */
+/*       foldScores(pairs, scores, m1, m2); */
+/*     } */
+
+/*     auto t1 = std::chrono::high_resolution_clock::now(); */
+
+/*     std::cout << "CPU: " */ 
+/*       << (std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / kIters) */
+/*       << "us" << std::endl; */
+/*   } */
+
+/*   if (1) { */
+/*     const int kIters = 500; */
+
+/*     for (int t = 0; t < 100; ++t) { */
+/*       stereo_matcher::scores(d1_gpu, d2_gpu, pairs_gpu, scores_gpu); */
+/*       cudaDeviceSynchronize(); */
+/*     } */
+
+/*     auto t0 = std::chrono::high_resolution_clock::now(); */
+
+
+/*     for (int t = 0; t < kIters; ++t) { */
+/*       stereo_matcher::scores(d1_gpu, d2_gpu, pairs_gpu, scores_gpu); */
+/*       cudaDeviceSynchronize(); */
+/*     } */
+
+/*     auto t1 = std::chrono::high_resolution_clock::now(); */
+
+/*     std::cout << "GPU: " */ 
+/*       << (std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / kIters) */
+/*       << "us" << std::endl; */
+/*   } */
+
+/*   return 0; */
+/* } */

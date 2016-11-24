@@ -3,20 +3,38 @@
 
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
-namespace stereo_matcher {
-  /** 
-   * m1, m2 and m should be of an appropriate size
-   */
-  cv::cudev::GpuMat_<cv::Vec2s> match(
-      const cv::cudev::GpuMat_<uchar>& d1,
-      const cv::cudev::GpuMat_<uchar>& d2,
-      const cv::cudev::GpuMat_<cv::Vec2s>& pairs,
-      float threshold_ratio,
-      cv::cudev::GpuMat_<cv::Vec4w>& m1,
-      cv::cudev::GpuMat_<cv::Vec4w>& m2,
-      cv::cudev::GpuMat_<cv::Vec2s>& m);
+class Matcher {
+  public:
+    Matcher(int max_descriptors, int max_pairs);
 
-}
+    const std::vector<cv::Vec2s>& match(
+        const cv::cudev::GpuMat_<uint8_t>& d1,
+        const cv::cudev::GpuMat_<uint8_t>& d2,
+        const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu,
+        const std::vector<cv::Vec2s>& pairs_cpu,
+        float threshold_ratio);
+
+    void computeScores(
+        const cv::cudev::GpuMat_<uint8_t>& d1,
+        const cv::cudev::GpuMat_<uint8_t>& d2,
+        const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu);
+
+    const std::vector<cv::Vec2s>& gatherMatches(
+        int n1, int n2,
+        const std::vector<cv::Vec2s>& pairs_cpu,
+        float threshold_ratio);
+
+  private:
+    struct Match {
+      ushort best, second;
+      ushort match;
+    };
+
+    cv::cudev::GpuMat_<uint16_t> scores_gpu_;
+    cv::Mat_<uint16_t> scores_cpu_; 
+    std::vector<Match> m1_, m2_;
+    std::vector<cv::Vec2s> matches_;
+};
 
 #endif
 

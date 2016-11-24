@@ -2,117 +2,137 @@
 
 #include <opencv2/core/cuda/common.hpp>
 #include <opencv2/cudev/ptr2d/glob.hpp>
+#include <opencv2/cudev/ptr2d/gpumat.hpp>
 
-namespace stereo_matcher {
-  __device__ int match_count;
+#include "stereo_matcher.hpp"
 
-  const int kPairsPerBlock = 16;
+namespace {
 
-  __global__ void match(
+  const int kPairsPerBlock = 64;
+  const int kThreadsPerPair = 4;
+
+  __global__ void compute_scores(
       const cv::cudev::GlobPtr<uchar> d1,
       const cv::cudev::GlobPtr<uchar> d2,
       const ushort2* pairs,
       int n_pairs,
-      ushort4* m1,
-      ushort4* m2) {
+      ushort* global_scores) {
    
-    __shared__ uint all_scores[kPairsPerBlock][32];
-    uint* scores = all_scores[threadIdx.y];
+    __shared__ ushort all_scores[kPairsPerBlock+1][kThreadsPerPair];
+    volatile ushort* scores = all_scores[threadIdx.y];
 
     uint pair_id = kPairsPerBlock * blockIdx.x + threadIdx.y;
-    uint tid = threadIdx.x;
-
-    ushort2 p = pairs[pair_id];
 
     if (pair_id < n_pairs) {
       uint tid = threadIdx.x;
 
       ushort2 p = pairs[pair_id];
+      const uint4* r1 = reinterpret_cast<const uint4*>(d1.row(p.x));
+      const uint4* r2 = reinterpret_cast<const uint4*>(d2.row(p.y));
 
-      ushort b1 = *(reinterpret_cast<const ushort*>(d1.row(p.x)) + tid);
-      ushort b2 = *(reinterpret_cast<const ushort*>(d2.row(p.y)) + tid);
+      uint4 b1 = *(r1 + tid);
+      uint4 b2 = *(r2 + tid);
 
-      scores[tid] = __popc(b1 ^ b2);
-   }
+      scores[tid] = 
+        __popc(b1.x ^ b2.x) + 
+        __popc(b1.y ^ b2.y) + 
+        __popc(b1.z ^ b2.z) + 
+        __popc(b1.w ^ b2.w);
 
-    __syncthreads();
+      scores[tid] += scores[tid + 2];
+      scores[tid] += scores[tid + 1];
 
-    if (pair_id < n_pairs) {
-      #pragma unroll
-      for (uint s = 32/2; s > 0; s /= 2) {
-        if (tid < s) {
-          scores[tid] += scores[tid + s];
-        }
-        
-        __syncthreads();
+      if (tid == 0) global_scores[pair_id] = scores[0];
+    }
+  }
+}
+
+__host__ Matcher::Matcher(int max_descriptors, int max_pairs) :
+    scores_gpu_(1, max_pairs),
+    scores_cpu_(1, max_pairs),
+    m1_(max_descriptors),
+    m2_(max_descriptors),
+    matches_(max_descriptors) {
+}
+
+__host__ const std::vector<cv::Vec2s>& Matcher::match(
+    const cv::cudev::GpuMat_<uint8_t>& d1,
+    const cv::cudev::GpuMat_<uint8_t>& d2,
+    const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu,
+    const std::vector<cv::Vec2s>& pairs_cpu,
+    float threshold_ratio) {
+  computeScores(d1, d2, pairs_gpu);
+  int n = pairs_cpu.size();
+  scores_gpu_.colRange(0, n).download(scores_cpu_.colRange(0, n));
+  return gatherMatches(d1.rows, d2.rows, pairs_cpu, threshold_ratio);
+}
+
+__host__ void Matcher::computeScores(
+    const cv::cudev::GpuMat_<uint8_t>& d1,
+    const cv::cudev::GpuMat_<uint8_t>& d2,
+    const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu) {
+
+  int n_blocks = (pairs_gpu.cols + kPairsPerBlock - 1) / kPairsPerBlock;
+  dim3 block_dim(kThreadsPerPair, kPairsPerBlock);
+
+  compute_scores<<<n_blocks, block_dim>>>(
+      d1, d2, 
+      pairs_gpu.ptr<ushort2>(), pairs_gpu.cols, 
+      scores_gpu_.ptr<ushort>());
+
+  cudaSafeCall(cudaGetLastError());
+}
+
+#include <iostream>
+
+__host__ const std::vector<cv::Vec2s>& Matcher::gatherMatches(
+    int n1, int n2,
+    const std::vector<cv::Vec2s>& pairs_cpu,
+    float threshold_ratio) {
+ 
+  for (auto& m : m1_) {
+    m.best = m.second = m.match = 0xFFFF;
+  }
+
+  for (auto& m : m2_) {
+    m.best = m.second = m.match = 0xFFFF;
+  }
+
+  /* std::cout << "Scores CPU: " <<  scores_cpu_.colRange(0, pairs_cpu.size()) << std::endl; */
+
+  auto updateMatch = [](Match& m, uint16_t s, uint16_t j) {
+    if (s < m.best) {
+      m = { s, m.best, j };
+    } else if (s < m.second) {
+      m.second = s;
+    }
+  };
+
+  for (int i = 0; i < pairs_cpu.size(); ++i) {
+    const auto& p = pairs_cpu[i];
+    uint16_t s = scores_cpu_(0, i);
+
+    updateMatch(m1_[p[0]], s, p[1]);
+    updateMatch(m2_[p[1]], s, p[0]);
+  }
+
+  /* std::cout << "m1 = "; */
+  /* for (int i=0; i < n1; ++i) { */
+  /*   std::cout << "[" << m1_[i].best << ", " */ 
+  /*     << m1_[i].second << ", " << m1_[i].match << "] "; */
+  /* } */
+  /* std::cout << std::endl; */
+
+  matches_.resize(0);
+  for (int i = 0; i < n1; ++i) {
+    const auto& m1 = m1_[i];
+    if (m1.best != 0xFFFF && m1.second * 0.8 > m1.best) {
+      const auto& m2 = m2_[m1.match];
+      if (m2.second * 0.8 > m2.best && m2.match == i) {
+        matches_.push_back(cv::Vec2s(i, m1.match));
       }
     }
-
-    uint score = scores[0];
-   
-    /* if (tid == 0 && pair_id < n_pairs) { */
-    /*   printf("P%d, %d: %d %d %d\n", pair_id, tid, p.x, p.y, score); */
-    /* } */
-
-    return;
-
-    if (pair_id < n_pairs && tid <= 1) {
-      ushort i = tid == 0 ? p.x : p.y;
-      ushort j = tid == 0 ? p.y : p.x;
-      unsigned long long* m = 
-        reinterpret_cast<unsigned long long*>(tid == 0 ? m1 : m2) + i;
-
-
-      bool ok = false;
-      do {
-        unsigned long long old_v = *m;
-        unsigned long long new_v;
-
-        const ushort4& old_entry = *reinterpret_cast<const ushort4*>(&old_v);
-        ushort4& new_entry = *reinterpret_cast<ushort4*>(&new_v);
-        bool updated = false;
-        if (score < old_entry.x) {
-          new_entry = make_ushort4(score, old_entry.x, j, 0);
-          updated = true;
-        } else if (score < old_entry.y) {
-          new_entry = make_ushort4(old_entry.x, score, old_entry.z, 0);
-          updated = true;
-        }
-
-//        ok = updated ? atomicCAS(m, old_v, new_v) == old_v : true;
-        *m = new_v;
-        ok = true;
-      } while (!ok);
-    }
   }
 
-  int gpu_match(
-      const cv::cudev::GlobPtr<uchar> d1,
-      const cv::cudev::GlobPtr<uchar> d2,
-      const ushort2* pairs,
-      int n_pairs,
-      float threshold_ratio,
-      ushort4* m1,
-      int n1,
-      ushort4* m2,
-      int n2,
-      ushort2* m) {
-    
-    int* match_count_dev;
-    cudaSafeCall(cudaGetSymbolAddress((void**)&match_count_dev, match_count));
-    cudaSafeCall(cudaMemset(match_count_dev, 0, sizeof(int)));
-
-    cudaSafeCall(cudaMemset(m1, 0xff, n1*sizeof(ushort4)));
-    cudaSafeCall(cudaMemset(m2, 0xff, n2*sizeof(ushort4)));
-
-    int n_blocks = (n_pairs + kPairsPerBlock - 1) / kPairsPerBlock;
-
-    match<<<n_blocks, dim3(32, kPairsPerBlock)>>>(
-        d1, d2, pairs, n_pairs, m1, m2);
-
-    cudaSafeCall(cudaGetLastError());
-
-    return 0;
-  }
-  
+  return matches_;
 }

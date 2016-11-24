@@ -24,6 +24,10 @@ endif()
 
 include_directories("/usr/include/libusb-1.0")
 
+## 3rd party libs
+include_directories("../../3rdparty/benchmark/include")
+link_directories("../../3rdparty/benchmark/build/src")
+
 find_package(catkin REQUIRED COMPONENTS
   rosbag
   roscpp
@@ -48,7 +52,7 @@ find_package(Ceres REQUIRED)
 
 find_package(CUDA ${CUDA_VERSION} REQUIRED)
 
-set(CUDA_NVCC_FLAGS -gencode arch=compute_20,code=sm_20 -lineinfo)
+set(CUDA_NVCC_FLAGS -gencode arch=compute_20,code=sm_20 -lineinfo -std=c++11)
 
 find_package(Eigen REQUIRED)
 
@@ -94,14 +98,6 @@ add_definitions(-std=c++11 -g)# -m64) #-Wall)
 
 #target_link_libraries(libviso)
 
-add_executable(
-  clique_test
-  src/test.cc) 
-
-target_link_libraries(
-  clique_test
-  ${OpenCV_LIBS})
-
 cuda_add_library(
   freak_gpu
   src/freak.cc
@@ -144,15 +140,15 @@ target_link_libraries(
 
 cuda_add_library(
   stereo_matcher
-  src/stereo_matcher.cc
   src/stereo_matcher.cu)
 
-add_executable(
+catkin_add_gtest(
   stereo_matcher_test
   src/stereo_matcher_test.cc)
 
 target_link_libraries(
   stereo_matcher_test
+  benchmark
   stereo_matcher
   math3d
   ${OpenCV_LIBS}
