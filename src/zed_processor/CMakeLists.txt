@@ -52,7 +52,12 @@ find_package(Ceres REQUIRED)
 
 find_package(CUDA ${CUDA_VERSION} REQUIRED)
 
-set(CUDA_NVCC_FLAGS -gencode arch=compute_20,code=sm_20 -lineinfo -std=c++11)
+set(CUDA_NVCC_FLAGS 
+  -gencode arch=compute_20,code=sm_20 
+  -lineinfo 
+  -std=c++11
+  -O2
+  -g)
 
 find_package(Eigen REQUIRED)
 
