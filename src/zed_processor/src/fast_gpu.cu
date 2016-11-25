@@ -5,7 +5,9 @@
 #include <opencv2/core/cuda/common.hpp>
 #include <opencv2/cudev/ptr2d/glob.hpp>
 
-namespace fast_gpu {
+#include "fast_gpu.hpp"
+
+namespace {
   const int BX = 16;
   const int BY = 16;
 
@@ -181,52 +183,53 @@ namespace fast_gpu {
   }
   
   __device__ int kp_index;
-
-  __host__ int detect(
-      const cv::cudev::GlobPtr<uchar> img,
-      short2 img_size,
-      int threshold,
-      int border,
-      cv::cudev::GlobPtr<uchar> scores, 
-      short2* tmp_keypoints_dev,
-      short3* keypoints_dev,
-      int max_keypoints) {
-    dim3 grid_dim((img_size.x + BX - 1) / BX, (img_size.y + BY - 1) / BY);
-    dim3 thread_block_dim(BX, BY);
-
-    int* kp_index_dev;
-    cudaSafeCall(cudaGetSymbolAddress((void**)&kp_index_dev, kp_index));
-    cudaSafeCall(cudaMemset(kp_index_dev, 0, sizeof(int)));
-  
-    compute_scores<<<grid_dim, thread_block_dim>>>(
-        img, 
-        img_size, 
-        threshold, 
-        border,
-        scores, 
-        tmp_keypoints_dev, 
-        kp_index_dev, 
-        max_keypoints);
-
-    int n_keypoints;
-    cudaSafeCall(cudaMemcpy(
-        &n_keypoints, kp_index_dev, sizeof(int), cudaMemcpyDeviceToHost)); 
-    cudaSafeCall(cudaMemset(kp_index_dev, 0, sizeof(int)));
-
-    nonmax_supression<<<(n_keypoints + 63)/64, 64>>>(
-        scores,
-        tmp_keypoints_dev,
-        n_keypoints,
-        keypoints_dev,
-        kp_index_dev,
-        max_keypoints);
-
-
-    cudaSafeCall(cudaMemcpy(
-        &n_keypoints, kp_index_dev, sizeof(int), cudaMemcpyDeviceToHost)); 
-    
-    cudaSafeCall(cudaDeviceSynchronize());
-
-    return n_keypoints;
-  }
 }
+
+FastGpu::FastGpu(int max_keypoints, int border) : border_(border) {
+  tmp_keypoints_.create(1, max_keypoints);
+  final_keypoints_.create(1, max_keypoints);
+}
+
+void FastGpu::detect(const cv::cudev::GpuMat_<uchar>& img, int threshold) {
+  scores_.create(img.rows, img.cols);
+  scores_.setTo(0);
+
+  dim3 grid_dim((img.cols + BX - 1) / BX, (img.rows + BY - 1) / BY);
+  dim3 thread_block_dim(BX, BY);
+
+  int* kp_index_dev;
+  cudaSafeCall(cudaGetSymbolAddress((void**)&kp_index_dev, kp_index));
+  cudaSafeCall(cudaMemset(kp_index_dev, 0, sizeof(int)));
+
+  compute_scores<<<grid_dim, thread_block_dim>>>(
+      img, 
+      make_short2(img.cols, img.rows),
+      threshold, 
+      border_,
+      scores_, 
+      tmp_keypoints_.ptr<short2>(), 
+      kp_index_dev, 
+      tmp_keypoints_.cols);
+
+  int n_keypoints;
+  cudaSafeCall(cudaMemcpy(
+      &n_keypoints, kp_index_dev, sizeof(int), cudaMemcpyDeviceToHost)); 
+  cudaSafeCall(cudaMemset(kp_index_dev, 0, sizeof(int)));
+
+  nonmax_supression<<<(n_keypoints + 63)/64, 64>>>(
+      scores_,
+      tmp_keypoints_.ptr<short2>(),
+      n_keypoints,
+      final_keypoints_.ptr<short3>(),
+      kp_index_dev,
+      final_keypoints_.cols);
+
+  cudaSafeCall(cudaMemcpy(
+      &n_keypoints, kp_index_dev, sizeof(int), cudaMemcpyDeviceToHost)); 
+  
+  cudaSafeCall(cudaDeviceSynchronize());
+
+  keypoint_count_ = n_keypoints;
+}
+
+

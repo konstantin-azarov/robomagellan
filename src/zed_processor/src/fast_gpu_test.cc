@@ -191,23 +191,10 @@ void validateScores(
 }
 
 int main(int argc, char** argv) {
-  std::string img_file;
-  int threshold;
+  std::string img_file = "src/zed_processor/test_data/fast_test_image.png";
+  int threshold = 25;
 
-  po::options_description options("FAST performance test");
-  options.add_options()
-      ("image",
-       po::value<std::string>(&img_file)->required(),
-       "path to the image fil")
-      ("threshold",
-       po::value<int>(&threshold)->default_value(25),
-       "FAST threshold");
-  
-  po::variables_map vm;
-  po::store(po::parse_command_line(argc, argv, options), vm);
-  po::notify(vm);
 
-  
   auto tmp = cv::imread(img_file, cv::IMREAD_GRAYSCALE);
   cv::Mat_<uint8_t> img;
   cv::resize(tmp, img, cv::Size(1280, 720));

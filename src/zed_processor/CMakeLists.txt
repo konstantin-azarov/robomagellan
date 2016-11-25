@@ -129,10 +129,9 @@ target_link_libraries(
 
 cuda_add_library(
   fast_gpu
-  src/fast_gpu.cc
   src/fast_gpu.cu)
 
-add_executable(
+catkin_add_gtest(
   fast_gpu_test
   src/fast_gpu_test.cc)
 
