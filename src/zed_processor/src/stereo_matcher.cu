@@ -51,44 +51,36 @@ __host__ Matcher::Matcher(int max_descriptors, int max_pairs) :
     scores_gpu_(1, max_pairs),
     scores_cpu_(1, max_pairs),
     m1_(max_descriptors),
-    m2_(max_descriptors),
-    matches_(max_descriptors) {
-}
-
-__host__ const std::vector<cv::Vec2s>& Matcher::match(
-    const cv::cudev::GpuMat_<uint8_t>& d1,
-    const cv::cudev::GpuMat_<uint8_t>& d2,
-    const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu,
-    const std::vector<cv::Vec2s>& pairs_cpu,
-    float threshold_ratio) {
-  computeScores(d1, d2, pairs_gpu);
-  int n = pairs_cpu.size();
-  scores_gpu_.colRange(0, n).download(scores_cpu_.colRange(0, n));
-  return gatherMatches(d1.rows, d2.rows, pairs_cpu, threshold_ratio);
+    m2_(max_descriptors) {
 }
 
 __host__ void Matcher::computeScores(
     const cv::cudev::GpuMat_<uint8_t>& d1,
     const cv::cudev::GpuMat_<uint8_t>& d2,
-    const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu) {
+    const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu,
+    cv::cuda::Stream& stream) {
 
-  int n_blocks = (pairs_gpu.cols + kPairsPerBlock - 1) / kPairsPerBlock;
+  int n_pairs = pairs_gpu.cols;
+  int n_blocks = (n_pairs + kPairsPerBlock - 1) / kPairsPerBlock;
   dim3 block_dim(kThreadsPerPair, kPairsPerBlock);
 
-  compute_scores<<<n_blocks, block_dim>>>(
+  auto cuda_stream = cv::cuda::StreamAccessor::getStream(stream);
+  compute_scores<<<n_blocks, block_dim, 0, cuda_stream>>>(
       d1, d2, 
       pairs_gpu.ptr<ushort2>(), pairs_gpu.cols, 
       scores_gpu_.ptr<ushort>());
 
+  scores_gpu_.colRange(0, n_pairs).download(
+      scores_cpu_.colRange(0, n_pairs), stream);
+
   cudaSafeCall(cudaGetLastError());
 }
 
-#include <iostream>
-
-__host__ const std::vector<cv::Vec2s>& Matcher::gatherMatches(
+__host__ void Matcher::gatherMatches(
     int n1, int n2,
     const std::vector<cv::Vec2s>& pairs_cpu,
-    float threshold_ratio) {
+    float threshold_ratio,
+    std::vector<cv::Vec2s>& matches) {
  
   for (auto& m : m1_) {
     m.best = m.second = m.match = 0xFFFF;
@@ -123,16 +115,14 @@ __host__ const std::vector<cv::Vec2s>& Matcher::gatherMatches(
   /* } */
   /* std::cout << std::endl; */
 
-  matches_.resize(0);
+  matches.resize(0);
   for (int i = 0; i < n1; ++i) {
     const auto& m1 = m1_[i];
     if (m1.best != 0xFFFF && m1.second * 0.8 > m1.best) {
       const auto& m2 = m2_[m1.match];
       if (m2.second * 0.8 > m2.best && m2.match == i) {
-        matches_.push_back(cv::Vec2s(i, m1.match));
+        matches.push_back(cv::Vec2s(i, m1.match));
       }
     }
   }
-
-  return matches_;
 }

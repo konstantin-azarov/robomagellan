@@ -128,6 +128,10 @@ TEST(StereoMatcherTest, random) {
     std::make_tuple(10000, 100000, 1)
   };
 
+  std::vector<cv::Vec2s> matches;
+
+  auto stream = cv::cuda::Stream::Null();
+
   for (auto test : tests) {
     int ndescs = std::get<0>(test);
     int npairs = std::get<1>(test);
@@ -138,17 +142,17 @@ TEST(StereoMatcherTest, random) {
       cv::Mat_<uchar> d2 = randomDescriptors(ndescs);
       std::vector<cv::Vec2s> pairs = randomPairs(ndescs, npairs);
 
-      auto res = matcher.match(
+       matcher.computeScores(
           cv::cudev::GpuMat_<uint8_t>(d1), 
           cv::cudev::GpuMat_<uint8_t>(d2),
           cv::cudev::GpuMat_<cv::Vec2s>(pairs), 
-          pairs, 0.8);
+          stream);
+      stream.waitForCompletion();
+      matcher.gatherMatches(ndescs, ndescs, pairs, 0.8, matches);
 
       auto golden = computeMatches(d1, d2, pairs, 0.8);
 
-      /* std::cout << cv::Mat_<cv::Vec2s>(golden) << std::endl; */
-
-      ASSERT_EQ(golden, res) << ndescs << ", " << npairs << ", " << t;
+      ASSERT_EQ(golden, matches) << ndescs << ", " << npairs << ", " << t;
     }
   }
 }
@@ -159,6 +163,7 @@ class MatcherBenchmarkFixture : public benchmark::Fixture {
     const int kPairs = 100000;
 
     MatcherBenchmarkFixture() : matcher_(kDescs, kPairs) {
+      matches_.reserve(kDescs);
     }
 
     virtual void SetUp(const benchmark::State&) {
@@ -166,7 +171,14 @@ class MatcherBenchmarkFixture : public benchmark::Fixture {
       d2_.upload(randomDescriptors(kDescs));
       pairs_cpu_ =randomPairs(kDescs, kPairs);
       pairs_gpu_.upload(pairs_cpu_);
-      matcher_.match(d1_, d2_, pairs_gpu_, pairs_cpu_, 0.8);
+      match();
+    }
+
+    void match() {
+      auto stream = cv::cuda::Stream::Null();
+      matcher_.computeScores(d1_, d2_, pairs_gpu_, stream);
+      stream.waitForCompletion();
+      matcher_.gatherMatches(d1_.rows, d2_.rows, pairs_cpu_, 0.8, matches_);
     }
 
   protected:
@@ -174,26 +186,26 @@ class MatcherBenchmarkFixture : public benchmark::Fixture {
     cv::cudev::GpuMat_<uint8_t> d1_, d2_;
     std::vector<cv::Vec2s> pairs_cpu_;
     cv::cudev::GpuMat_<cv::Vec2s> pairs_gpu_;
+    std::vector<cv::Vec2s> matches_;
 };
 
 BENCHMARK_F(MatcherBenchmarkFixture, Full)(benchmark::State& st) {
   while (st.KeepRunning()) {
-    matcher_.match(d1_, d2_, pairs_gpu_, pairs_cpu_, 0.8);
+    match();
   }
 }
 
-BENCHMARK_DEFINE_F(MatcherBenchmarkFixture, Gpu)(benchmark::State& st) {
+BENCHMARK_F(MatcherBenchmarkFixture, Gpu)(benchmark::State& st) {
   while (st.KeepRunning()) {
-    matcher_.computeScores(d1_, d2_, pairs_gpu_);
-    cudaDeviceSynchronize();
+    auto stream = cv::cuda::Stream::Null();
+    matcher_.computeScores(d1_, d2_, pairs_gpu_, stream);
+    stream.waitForCompletion();
   }
 }
-
-BENCHMARK_REGISTER_F(MatcherBenchmarkFixture, Gpu);//->UseRealTime();
 
 BENCHMARK_F(MatcherBenchmarkFixture, Cpu)(benchmark::State& st) {
   while (st.KeepRunning()) {
-    matcher_.gatherMatches(d1_.rows, d2_.rows, pairs_cpu_, 0.8);
+    matcher_.gatherMatches(d1_.rows, d2_.rows, pairs_cpu_, 0.8, matches_);
   }
 }
 
