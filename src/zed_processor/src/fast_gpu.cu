@@ -176,7 +176,7 @@ namespace {
       if (good) {
         int idx = atomicAdd(kp_index, 1);
         if (idx < max_keypoints) {
-          final_keypoints[idx] = make_short3(kp.x, kp.y, score);
+          final_keypoints[idx] = make_short3(kp.x, kp.y, score - 1);
         }
       }
     }
@@ -227,8 +227,6 @@ void FastGpu::detect(const cv::cudev::GpuMat_<uchar>& img, int threshold) {
   cudaSafeCall(cudaMemcpy(
       &n_keypoints, kp_index_dev, sizeof(int), cudaMemcpyDeviceToHost)); 
   
-  cudaSafeCall(cudaDeviceSynchronize());
-
   keypoint_count_ = n_keypoints;
 }
 

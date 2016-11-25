@@ -140,6 +140,7 @@ target_link_libraries(
   fast_gpu
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
+  benchmark
   dw)
 
 cuda_add_library(
@@ -152,11 +153,11 @@ catkin_add_gtest(
 
 target_link_libraries(
   stereo_matcher_test
-  benchmark
   stereo_matcher
   math3d
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
+  benchmark
   dw)
 
 add_library(
