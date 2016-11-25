@@ -133,11 +133,11 @@ cuda_add_library(
   src/fast_gpu.cu)
 
 add_executable(
-  fast_test
-  src/fast_test.cc)
+  fast_gpu_test
+  src/fast_gpu_test.cc)
 
 target_link_libraries(
-  fast_test
+  fast_gpu_test
   fast_gpu
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
