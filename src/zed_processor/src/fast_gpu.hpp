@@ -5,24 +5,23 @@
 #include <opencv2/core/cuda/common.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
+#include "cuda_device_vector.hpp"
+
 class FastGpu {
   public:
-    FastGpu(int max_keypoints, int border);
+    FastGpu(int max_unsuppressed_keypoints, int border);
+    ~FastGpu();
 
-    void detect(const cv::cudev::GpuMat_<uchar>& img, int threshold);
-
-    cv::cudev::GpuMat_<cv::Vec3s> keypoints() const { 
-      return final_keypoints_.colRange(0, keypoint_count_); 
-    }
+    void detect(
+        const cv::cudev::GpuMat_<uchar>& img, 
+        int threshold,
+        CudaDeviceVector<short3>& res);
 
   private:
-    cv::cudev::GpuMat_<uint8_t> scores_;
-
-    cv::cudev::GpuMat_<cv::Vec2s> tmp_keypoints_;
-    cv::cudev::GpuMat_<cv::Vec3s> final_keypoints_;
-
-    int keypoint_count_;
     int border_;
+
+    cv::cudev::GpuMat_<uint8_t> scores_;
+    CudaDeviceVector<short2> tmp_keypoints_;
 };
 
 #endif

@@ -16,9 +16,7 @@ namespace {
       short2 img_size,
       int threshold, int border,
       cv::cudev::GlobPtr<uchar> scores,
-      short2* keypoints,
-      int* kp_index,
-      int max_keypoints) {
+      CudaDeviceVector<short2>::Dev keypoints) {
 
     __shared__ uchar tile[BY + 6][BX + 6];
     int strip[16];
@@ -143,24 +141,18 @@ namespace {
       scores(py, px) = score;
 
       if (good) {
-        int idx = atomicAdd(kp_index, 1);
-        if (idx < max_keypoints) {
-          keypoints[idx] = make_short2(px, py);
-        }
+        keypoints.push(make_short2(px, py));
       }
     }
   }
 
   __global__ void nonmax_supression(
       cv::cudev::GlobPtr<uchar> scores,
-      short2* keypoints,
-      int count,
-      short3* final_keypoints,
-      int* kp_index,
-      int max_keypoints) {
+      const CudaDeviceVector<short2>::Dev keypoints,
+      CudaDeviceVector<short3>::Dev res) {
 
     int i = threadIdx.x + blockDim.x * blockIdx.x;
-    if (i < count) {
+    if (i < keypoints.size()) {
       short2 kp = keypoints[i];
       int score = scores(kp.y, kp.x);
 
@@ -174,32 +166,33 @@ namespace {
         scores(kp.y+1, kp.x  ) < score &&
         scores(kp.y+1, kp.x+1) < score;
       if (good) {
-        int idx = atomicAdd(kp_index, 1);
-        if (idx < max_keypoints) {
-          final_keypoints[idx] = make_short3(kp.x, kp.y, score - 1);
-        }
+        res.push(make_short3(kp.x, kp.y, score - 1));
       }
     }
   }
-  
-  __device__ int kp_index;
 }
 
-FastGpu::FastGpu(int max_keypoints, int border) : border_(border) {
-  tmp_keypoints_.create(1, max_keypoints);
-  final_keypoints_.create(1, max_keypoints);
+FastGpu::FastGpu(int max_keypoints, int border) : 
+  border_(border),
+  tmp_keypoints_(max_keypoints) {
+
 }
 
-void FastGpu::detect(const cv::cudev::GpuMat_<uchar>& img, int threshold) {
+FastGpu::~FastGpu() {
+}
+
+void FastGpu::detect(
+    const cv::cudev::GpuMat_<uchar>& img, 
+    int threshold,
+    CudaDeviceVector<short3>& res) {
   scores_.create(img.rows, img.cols);
   scores_.setTo(0);
 
   dim3 grid_dim((img.cols + BX - 1) / BX, (img.rows + BY - 1) / BY);
   dim3 thread_block_dim(BX, BY);
 
-  int* kp_index_dev;
-  cudaSafeCall(cudaGetSymbolAddress((void**)&kp_index_dev, kp_index));
-  cudaSafeCall(cudaMemset(kp_index_dev, 0, sizeof(int)));
+  tmp_keypoints_.clear();
+  res.clear();
 
   compute_scores<<<grid_dim, thread_block_dim>>>(
       img, 
@@ -207,27 +200,12 @@ void FastGpu::detect(const cv::cudev::GpuMat_<uchar>& img, int threshold) {
       threshold, 
       border_,
       scores_, 
-      tmp_keypoints_.ptr<short2>(), 
-      kp_index_dev, 
-      tmp_keypoints_.cols);
+      tmp_keypoints_);
 
-  int n_keypoints;
-  cudaSafeCall(cudaMemcpy(
-      &n_keypoints, kp_index_dev, sizeof(int), cudaMemcpyDeviceToHost)); 
-  cudaSafeCall(cudaMemset(kp_index_dev, 0, sizeof(int)));
+  int n_keypoints = tmp_keypoints_.size();
 
   nonmax_supression<<<(n_keypoints + 63)/64, 64>>>(
-      scores_,
-      tmp_keypoints_.ptr<short2>(),
-      n_keypoints,
-      final_keypoints_.ptr<short3>(),
-      kp_index_dev,
-      final_keypoints_.cols);
-
-  cudaSafeCall(cudaMemcpy(
-      &n_keypoints, kp_index_dev, sizeof(int), cudaMemcpyDeviceToHost)); 
-  
-  keypoint_count_ = n_keypoints;
+      scores_, tmp_keypoints_, res);
 }
 
 

@@ -16,6 +16,7 @@
 #define BACKWARD_HAS_DW 1
 #include "backward.hpp"
 
+#include "cuda_device_vector.hpp"
 #include "fast_gpu.hpp"
 
 backward::SignalHandling sh;
@@ -35,13 +36,14 @@ TEST(FastGpu, features) {
 
   cv::FAST(img, opencv_keypoints, threshold, true);
  
-  my_fast.detect(img_gpu, threshold);
-  std::vector<cv::Vec3s> my_keypoints;
-  my_fast.keypoints().download(my_keypoints);
+  CudaDeviceVector<short3> my_keypoints_dev(kMaxKeypoints);
+  my_fast.detect(img_gpu, threshold, my_keypoints_dev);
+  std::vector<short3> my_keypoints;
+  my_keypoints_dev.download(my_keypoints);
 
   std::sort(std::begin(my_keypoints), std::end(my_keypoints),
-      [](const cv::Vec3s& a, const cv::Vec3s& b) {
-        return a[1] != b[1] ? a[1] < b[1] : a[0] < b[0];
+      [](const short3& a, const short3& b) {
+        return a.y != b.y ? a.y < b.y : a.x < b.x;
       });
 
   std::sort(std::begin(opencv_keypoints), std::end(opencv_keypoints),
@@ -51,15 +53,17 @@ TEST(FastGpu, features) {
 
   ASSERT_EQ(opencv_keypoints.size(), my_keypoints.size());
   for (int i = 0; i < my_keypoints.size(); ++i) {
-    ASSERT_EQ(opencv_keypoints[i].pt.x, my_keypoints[i][0]) << i;
-    ASSERT_EQ(opencv_keypoints[i].pt.y, my_keypoints[i][1]) << i;
-    ASSERT_EQ(opencv_keypoints[i].response, my_keypoints[i][2]) << i;
+    ASSERT_EQ(opencv_keypoints[i].pt.x, my_keypoints[i].x) << i;
+    ASSERT_EQ(opencv_keypoints[i].pt.y, my_keypoints[i].y) << i;
+    ASSERT_EQ(opencv_keypoints[i].response, my_keypoints[i].z) << i;
   }
 }
 
 class FastBenchmark : public benchmark::Fixture {
   public:
-    FastBenchmark() : my_fast_(kMaxKeypoints, 3) {
+    FastBenchmark() : 
+        my_fast_(kMaxKeypoints, 3), 
+        keypoints_gpu_(kMaxKeypoints) {
       base_img_ = cv::imread(kTestImg, cv::IMREAD_GRAYSCALE);
     }
 
@@ -78,14 +82,16 @@ class FastBenchmark : public benchmark::Fixture {
     cv::Ptr<cv::cuda::FastFeatureDetector> opencv_fast_;
     cv::Mat base_img_;
     cv::cudev::GpuMat_<uint8_t> img_gpu_;
-    cv::cudev::GpuMat keypoints_gpu_;
+    cv::cuda::GpuMat keypoints_opencv_;
+    CudaDeviceVector<short3> keypoints_gpu_;
     int threshold_;
 };
 
-BENCHMARK_DEFINE_F(FastBenchmark, openCV)(benchmark::State& state) {
+BENCHMARK_DEFINE_F(FastBenchmark, openCv)(benchmark::State& state) {
   auto stream = cv::cuda::Stream::Null();
   while (state.KeepRunning()) {
-    opencv_fast_->detectAsync(img_gpu_, keypoints_gpu_, cv::noArray(), stream);
+    opencv_fast_->detectAsync(
+        img_gpu_, keypoints_opencv_, cv::noArray(), stream);
     stream.waitForCompletion();
   }
 }
@@ -93,7 +99,7 @@ BENCHMARK_DEFINE_F(FastBenchmark, openCV)(benchmark::State& state) {
 BENCHMARK_DEFINE_F(FastBenchmark, mine)(benchmark::State& state) {
   auto stream = cv::cuda::Stream::Null();
   while (state.KeepRunning()) {
-    my_fast_.detect(img_gpu_, threshold_);
+    my_fast_.detect(img_gpu_, threshold_, keypoints_gpu_);
     cudaDeviceSynchronize();
   }
 }
@@ -111,7 +117,7 @@ void fastBenchmarkArgs(benchmark::internal::Benchmark* b) {
   b->Args({320, 200, 25});
 }
 
-BENCHMARK_REGISTER_F(FastBenchmark, openCV)->Apply(fastBenchmarkArgs);
+BENCHMARK_REGISTER_F(FastBenchmark, openCv)->Apply(fastBenchmarkArgs);
 BENCHMARK_REGISTER_F(FastBenchmark, mine)->Apply(fastBenchmarkArgs);
 
 int main(int argc, char** argv) {
