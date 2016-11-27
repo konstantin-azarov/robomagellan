@@ -26,12 +26,13 @@ class FreakBase {
       int i, j;
     };
 
-    const int kLayers = 8;
-    const int kPointsInLayer = 6;
+    static const int kLayers = 8;
+    static const int kPointsInLayer = 6;
     // Innermost layer has one point only
-    const int kPoints = (kLayers-1)*kPointsInLayer + 1;
-    const int kOrientations = 256;
-    const int kPairs = 512;
+    static const int kPoints = (kLayers-1)*kPointsInLayer + 1;
+    static const int kOrientations = 256;
+    static const int kOrientationPairs = 45;
+    static const int kPairs = 512;
 
     double feature_size_;
 

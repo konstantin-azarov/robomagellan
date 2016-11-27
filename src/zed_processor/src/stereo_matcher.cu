@@ -11,11 +11,10 @@ namespace {
   const int kPairsPerBlock = 64;
   const int kThreadsPerPair = 4;
 
-  __global__ void compute_scores(
+  __global__ void computeScoresGpu(
       const cv::cudev::GlobPtr<uchar> d1,
       const cv::cudev::GlobPtr<uchar> d2,
-      const ushort2* pairs,
-      int n_pairs,
+      CudaDeviceVector<ushort2>::Dev pairs,
       ushort* global_scores) {
    
     __shared__ ushort all_scores[kPairsPerBlock+1][kThreadsPerPair];
@@ -23,7 +22,7 @@ namespace {
 
     uint pair_id = kPairsPerBlock * blockIdx.x + threadIdx.y;
 
-    if (pair_id < n_pairs) {
+    if (pair_id < pairs.size()) {
       uint tid = threadIdx.x;
 
       ushort2 p = pairs[pair_id];
@@ -57,17 +56,17 @@ __host__ Matcher::Matcher(int max_descriptors, int max_pairs) :
 __host__ void Matcher::computeScores(
     const cv::cudev::GpuMat_<uint8_t>& d1,
     const cv::cudev::GpuMat_<uint8_t>& d2,
-    const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu,
+    const CudaDeviceVector<ushort2>& pairs_gpu,
+    int n_pairs,
     cv::cuda::Stream& stream) {
 
-  int n_pairs = pairs_gpu.cols;
   int n_blocks = (n_pairs + kPairsPerBlock - 1) / kPairsPerBlock;
   dim3 block_dim(kThreadsPerPair, kPairsPerBlock);
 
   auto cuda_stream = cv::cuda::StreamAccessor::getStream(stream);
-  compute_scores<<<n_blocks, block_dim, 0, cuda_stream>>>(
+  computeScoresGpu<<<n_blocks, block_dim, 0, cuda_stream>>>(
       d1, d2, 
-      pairs_gpu.ptr<ushort2>(), pairs_gpu.cols, 
+      pairs_gpu,
       scores_gpu_.ptr<ushort>());
 
   scores_gpu_.colRange(0, n_pairs).download(
@@ -78,7 +77,7 @@ __host__ void Matcher::computeScores(
 
 __host__ void Matcher::gatherMatches(
     int n1, int n2,
-    const std::vector<cv::Vec2s>& pairs_cpu,
+    const std::vector<ushort2>& pairs_cpu,
     float threshold_ratio,
     std::vector<cv::Vec2s>& matches) {
  
@@ -104,8 +103,8 @@ __host__ void Matcher::gatherMatches(
     const auto& p = pairs_cpu[i];
     uint16_t s = scores_cpu_(0, i);
 
-    updateMatch(m1_[p[0]], s, p[1]);
-    updateMatch(m2_[p[1]], s, p[0]);
+    updateMatch(m1_[p.x], s, p.y);
+    updateMatch(m2_[p.y], s, p.x);
   }
 
   /* std::cout << "m1 = "; */

@@ -5,6 +5,7 @@
 #include <string>
 
 #include "calibration_data.hpp"
+#include "frame_processor.hpp"
 #include "cross_frame_processor.hpp"
 #include "direction_tracker.hpp"
 

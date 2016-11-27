@@ -21,7 +21,7 @@
 
 backward::SignalHandling sh;
   
-std::string kTestImg = "src/zed_processor/test_data/fast_test_image.png";
+const std::string kTestImg = "src/zed_processor/test_data/fast_test_image.png";
 const int kMaxKeypoints = 200000;
 
 TEST(FastGpu, features) {
@@ -64,12 +64,12 @@ class FastBenchmark : public benchmark::Fixture {
     FastBenchmark() : 
         my_fast_(kMaxKeypoints, 3), 
         keypoints_gpu_(kMaxKeypoints) {
-      base_img_ = cv::imread(kTestImg, cv::IMREAD_GRAYSCALE);
     }
 
     void SetUp(const benchmark::State& s) {
+      auto base_img = cv::imread(kTestImg, cv::IMREAD_GRAYSCALE);
       cv::Mat img;
-      cv::resize(base_img_, img, {s.range(0), s.range(1)});   
+      cv::resize(base_img, img, {s.range(0), s.range(1)});   
       img_gpu_.upload(img);
       threshold_ = s.range(2);
 
@@ -80,7 +80,6 @@ class FastBenchmark : public benchmark::Fixture {
   protected:
     FastGpu my_fast_;
     cv::Ptr<cv::cuda::FastFeatureDetector> opencv_fast_;
-    cv::Mat base_img_;
     cv::cudev::GpuMat_<uint8_t> img_gpu_;
     cv::cuda::GpuMat keypoints_opencv_;
     CudaDeviceVector<short3> keypoints_gpu_;

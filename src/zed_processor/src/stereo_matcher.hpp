@@ -3,6 +3,8 @@
 
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
+#include "cuda_device_vector.hpp"
+
 class Matcher {
   public:
     Matcher(int max_descriptors, int max_pairs);
@@ -11,13 +13,14 @@ class Matcher {
     void computeScores(
         const cv::cudev::GpuMat_<uint8_t>& d1,
         const cv::cudev::GpuMat_<uint8_t>& d2,
-        const cv::cudev::GpuMat_<cv::Vec2s>& pairs_gpu,
+        const CudaDeviceVector<ushort2>& pairs_gpu,
+        int n_pairs,
         cv::cuda::Stream& stream);
 
-    // Should be called after operations in computeScoresAsync complete
+    // Should be called after operations in computeScores complete
      void gatherMatches(
         int n1, int n2,
-        const std::vector<cv::Vec2s>& pairs_cpu,
+        const std::vector<ushort2>& pairs_cpu,
         float threshold_ratio,
         std::vector<cv::Vec2s>& matches);
 

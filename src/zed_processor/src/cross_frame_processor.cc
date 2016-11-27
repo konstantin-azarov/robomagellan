@@ -15,12 +15,12 @@ CrossFrameProcessor::CrossFrameProcessor(
 }
 
 bool CrossFrameProcessor::process(
-    const FrameProcessor& p1, 
-    const FrameProcessor& p2) {
+    const FrameData& p1, 
+    const FrameData& p2) {
   auto t0 = std::chrono::high_resolution_clock::now();
 
-  const std::vector<cv::Point3d>& points1 = p1.points();
-  const std::vector<cv::Point3d>& points2 = p2.points();
+  const auto& points1 = p1.points;
+  const auto& points2 = p2.points;
 
   auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -36,16 +36,13 @@ bool CrossFrameProcessor::process(
   for (int i=0; i < matches_[0].size(); ++i) {
     int j = matches_[0][i];
     if (j != -1 && matches_[1][j] == i) {
-      const auto& kp = p2.keypoints(0)[p2.pointKeypoints()[j]];
+      const auto& kp = points2[j].left;
       int bucket = std::floor(kp.y / bucket_h) * config_.x_buckets + 
         std::floor(kp.x / bucket_w);
-      float score = p1.keypoints(0)[p1.pointKeypoints()[i]].z + 
-                    p1.keypoints(1)[p1.pointKeypoints()[i]].z +  
-                    p2.keypoints(0)[p2.pointKeypoints()[j]].z + 
-                    p2.keypoints(1)[p2.pointKeypoints()[j]].z;
-
+      float score = points1[i].score + points2[j].score;
       full_matches_.push_back(
-          CrossFrameMatch(points1[i], points2[j], bucket, score, i, j));
+          CrossFrameMatch(
+            points1[i].world, points2[j].world, bucket, score, i, j));
     }
   }
 
@@ -75,7 +72,7 @@ bool CrossFrameProcessor::process(
     }
     ++i;
   }
-
+  
   fillReprojectionFeatures_(p1, p2);
 
   // --
@@ -83,7 +80,6 @@ bool CrossFrameProcessor::process(
   auto t2 = std::chrono::high_resolution_clock::now();
 
   buildClique_(p1, p2);
-
   auto t3 = std::chrono::high_resolution_clock::now();
 
   if (!estimatePose()) {
@@ -107,12 +103,12 @@ bool CrossFrameProcessor::process(
 }
 
 void CrossFrameProcessor::match(
-    const FrameProcessor& p1, 
-    const FrameProcessor& p2,
+    const FrameData& p1, 
+    const FrameData& p2,
     std::vector<int>& matches) {
 
-  const std::vector<cv::Point3d>& points1 = p1.points();
-  const std::vector<cv::Point3d>& points2 = p2.points();
+  const auto& points1 = p1.points;
+  const auto& points2 = p2.points;
 
   matches.resize(points1.size());
 
@@ -120,18 +116,18 @@ void CrossFrameProcessor::match(
     int best_j = -1;
     double best_dist = 1E+15;
 
-    auto left_descs = p1.pointDescriptors(i);
-
     for (int j = 0; j < points2.size(); ++j) {
-      double screen_d = cv::norm(p1.features(i).first - p2.features(j).first);
+      double screen_d = cv::norm(p1.points[i].left - p2.points[j].left);
       if (screen_d > config_.match_radius) {
         continue;
       }
 
-      auto right_descs = p2.pointDescriptors(j);
-
-      double d1 = descriptorDist(left_descs.first, right_descs.first);
-      double d2 = descriptorDist(left_descs.second, right_descs.second);
+      double d1 = descriptorDist(
+          p1.descriptors_left.row(p1.points[i].left_i), 
+          p2.descriptors_left.row(p2.points[j].left_i));
+      double d2 = descriptorDist(
+          p1.descriptors_right.row(p1.points[i].right_i), 
+          p2.descriptors_right.row(p2.points[j].right_i));
 
       double d = std::max(d1, d2);
 
@@ -146,8 +142,8 @@ void CrossFrameProcessor::match(
 }
 
 void CrossFrameProcessor::buildClique_(
-    const FrameProcessor& p1, 
-    const FrameProcessor& p2) {
+    const FrameData& p1, 
+    const FrameData& p2) {
   // Construct the matrix of the matches
   // matches i and j have an edge is distance between corresponding points in the
   // first image is equal to the distance between corresponding points in the
@@ -207,8 +203,8 @@ double CrossFrameProcessor::deltaL(const cv::Point3d& p1,
 }
 
 void CrossFrameProcessor::fillReprojectionFeatures_(
-    const FrameProcessor& p1,
-    const FrameProcessor& p2) {
+    const FrameData& p1,
+    const FrameData& p2) {
 
   all_reprojection_features_.resize(full_matches_.size());
   for (int i : filtered_matches_) {
@@ -218,8 +214,10 @@ void CrossFrameProcessor::fillReprojectionFeatures_(
 
     f.r1 = m.p1;
     f.r2 = m.p2;
-    std::tie(f.s1l, f.s1r) = p1.features(m.i1);
-    std::tie(f.s2l, f.s2r) = p2.features(m.i2);
+    f.s1l = p1.points[m.i1].left;
+    f.s1r = p1.points[m.i1].right;
+    f.s2l = p2.points[m.i2].left;
+    f.s2r = p2.points[m.i2].right;
   }
 }
 
@@ -266,19 +264,12 @@ bool CrossFrameProcessor::estimatePose() {
 
   // Reestimate using best features from the clique.
   if (clique_reprojection_features_.size() > 5) {
-    //std::cout << "clique:";
-
     filtered_reprojection_features_.resize(0);
     for (const auto& f : clique_reprojection_features_) {
-//      std::cout << " " << f.error;
-
        if (f.error < config_.inlier_threshold) {
-//         std::cout << "+";
         filtered_reprojection_features_.push_back(f);
       }
     }
- //   std::cout << std::endl;
-    
     estimateOne(filtered_reprojection_features_);
   }
 

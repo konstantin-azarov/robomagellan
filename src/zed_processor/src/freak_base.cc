@@ -143,7 +143,10 @@ void FreakBase::buildPatterns_() {
     }
   }
 
-//  std::cout << "Orientation: "; 
+  if (orientation_pairs_.size() != kOrientationPairs) {
+    abort();
+  }
+
   double f = 22.0 / feature_size_;
   for (auto& o : orientation_pairs_) {
     const float dx = (patterns_[o.i].x - patterns_[o.j].x) * f;
@@ -151,7 +154,6 @@ void FreakBase::buildPatterns_() {
     const float norm_sq = (dx*dx+dy*dy);
     o.dx = static_cast<int>(dx/norm_sq*4096.0+0.5);
     o.dy = static_cast<int>(dy/norm_sq*4096.0+0.5);
-    /* std::cout << o.i << " " << o.j << " " << dx << " " << dy << " " << o.dx << " " << o.dy << std::endl; */
   }
 }
 

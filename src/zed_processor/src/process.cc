@@ -82,10 +82,13 @@ int main(int argc, char** argv) {
     
   int global_frame_index = start-1;
 
-  FrameProcessor frame_processors[] = {
-    FrameProcessor(calib),
-    FrameProcessor(calib)
+  FrameProcessor frame_processor(calib);
+
+  FrameData frame_data[2] = {
+    FrameData(kMaxKeypoints),
+    FrameData(kMaxKeypoints)
   };
+
 
   CrossFrameProcessorConfig cross_processor_config;
   CrossFrameProcessor cross_processor(calib, cross_processor_config);
@@ -106,7 +109,7 @@ int main(int argc, char** argv) {
   cv::Point3d camT = cv::Point3d(0, 0, 0);
 
   bool done = false;
-  while (!done && (frame_count == 0 || frame_index < frame_count)) {
+  while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
     Timer timer;
 
     if (!rdr.nextFrame(frame_mat)) {
@@ -120,32 +123,31 @@ int main(int argc, char** argv) {
 
     timer.mark("read");
 
-    FrameProcessor& processor = frame_processors[frame_index & 1];
+    FrameData& cur_frame = frame_data[frame_index % 2];
+    FrameData& prev_frame = frame_data[1 - (frame_index % 2)];
 
-    processor.process(mono_frames, threshold);
+    frame_processor.process(mono_frames, threshold, cur_frame);
 
     timer.mark("process");
   
-    img_keypoints.resize(0);
-    for (const auto& kp : processor.keypoints(0)) {
-      img_keypoints.push_back(cv::Point2d(kp.x, kp.y));
-    }
+    /* img_keypoints.resize(0); */
+    /* for (const auto& kp : processor.keypoints(0)) { */
+    /*   img_keypoints.push_back(cv::Point2d(kp.x, kp.y)); */
+    /* } */
 
-    bool dir_found =
-      direction_tracker.process(img_keypoints, processor.descriptors(0));
+    /* bool dir_found = */
+    /*   direction_tracker.process(img_keypoints, processor.descriptors(0)); */
 
-    if (dir_found) {
-      std::cout 
-        << "Rypr = " 
-        << rotToEuler(direction_tracker.rot()) * 180 / M_PI << std::endl;
-    }
+    /* if (dir_found) { */
+    /*   std::cout */ 
+    /*     << "Rypr = " */ 
+    /*     << rotToEuler(direction_tracker.rot()) * 180 / M_PI << std::endl; */
+    /* } */
 
     timer.mark("dir");
 
-    auto p1 = &frame_processors[!(frame_index & 1)];
-
     if (frame_index > 0) {
-      bool ok = cross_processor.process(*p1, processor);
+      bool ok = cross_processor.process(prev_frame, cur_frame);
 
       timer.mark("cross");
 
@@ -172,16 +174,16 @@ int main(int argc, char** argv) {
     std::cout << "Times: " << timer.str() << std::endl;
 
     if (frame_index > 0 && debug) {
-      DebugRenderer renderer(
-          p1, 
-          &processor, 
-          &cross_processor, 
-          &direction_tracker,
-          &mono_calibration,
-          1600, 1200);
-      if (!renderer.loop()) {
-        break;
-      }
+      /* DebugRenderer renderer( */
+      /*     p1, */ 
+      /*     &processor, */ 
+      /*     &cross_processor, */ 
+      /*     &direction_tracker, */
+      /*     &mono_calibration, */
+      /*     1600, 1200); */
+      /* if (!renderer.loop()) { */
+      /*   break; */
+      /* } */
     }
   }
 

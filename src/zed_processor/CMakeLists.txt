@@ -105,10 +105,8 @@ add_definitions(-std=c++11 -g)# -m64) #-Wall)
 
 cuda_add_library(
   freak_gpu
-  src/freak.cc
   src/freak_base.cc
   src/freak_gpu.cu
-  src/freak_gpu.cc
 )
 
 target_link_libraries(
@@ -116,15 +114,17 @@ target_link_libraries(
   ${OpenCV_LIBS}
 )
 
-add_executable(
-  freak_test
-  src/freak_test.cc)
+catkin_add_gtest(
+  freak_gpu_test
+  src/freak_gpu_test.cc)
 
 target_link_libraries(
-  freak_test
+  freak_gpu_test
   freak_gpu
+  fast_gpu
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
+  benchmark
   dw)
 
 cuda_add_library(
@@ -241,9 +241,10 @@ target_link_libraries(
   process
   math3d
   reprojection_estimator
-  libdw.so
   freak_gpu
   fast_gpu
+  stereo_matcher
+  libdw.so
   ${catkin_LIBRARIES}
   ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY}
   ${OpenCV_LIBS}

@@ -1,7 +1,8 @@
-#include <boost/program_options.hpp>
-
 #include <chrono>
 #include <iostream>
+
+#include <benchmark/benchmark.h>
+#include <gtest/gtest.h>
 
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -12,14 +13,15 @@
 #define BACKWARD_HAS_DW 1
 #include "backward.hpp"
 
-#include "freak.hpp"
+#include "fast_gpu.hpp"
 #include "freak_gpu.hpp"
-
-namespace po = boost::program_options;
 
 backward::SignalHandling sh;
 
-cv::Mat_<uint8_t> linear_to_opencv(cv::Mat_<uint8_t> m) {
+const std::string kTestImg = "src/zed_processor/test_data/fast_test_image.png";
+const float kFeatureSize = 64.980350;
+
+cv::Mat_<uint8_t> linearToOpenCv(cv::Mat_<uint8_t> m) {
   if (m.cols != 512/8) {
     abort();
   }
@@ -36,7 +38,7 @@ cv::Mat_<uint8_t> linear_to_opencv(cv::Mat_<uint8_t> m) {
   return res;
 }
 
-cv::Mat_<uint8_t> gpu_to_linear(cv::Mat_<uint8_t> m) {
+cv::Mat_<uint8_t> gpuToLinear(cv::Mat_<uint8_t> m) {
   if (m.cols != 512/8) {
     abort();
   }
@@ -54,190 +56,124 @@ cv::Mat_<uint8_t> gpu_to_linear(cv::Mat_<uint8_t> m) {
   return res;
 }
 
-int main(int argc, char** argv) {
-  std::string img_file;
-  int threshold;
-  double feature_size;
-  
-  po::options_description options("Command line options");
-  options.add_options()
-      ("image",
-       po::value<std::string>(&img_file)->required(),
-       "path to the image fil")
-      ("threshold",
-       po::value<int>(&threshold)->default_value(30),
-       "FAST threshold")
-      ("feature-size",
-       po::value<double>(&feature_size)->default_value(64.980350),
-       "FREAK feature size");
-  
-  po::variables_map vm;
-  po::store(po::parse_command_line(argc, argv, options), vm);
-  po::notify(vm);
+TEST(FreakGpu, describe) {
+  auto img = cv::imread(kTestImg, cv::IMREAD_GRAYSCALE);
+  cv::cudev::GpuMat_<uint8_t> img_gpu(img);
 
-  int n_dev = cv::cuda::getCudaEnabledDeviceCount();
-  for (int i=0; i < n_dev; ++i) {
-    std::cout << "Device " << i << std::endl;
-    cv::cuda::printCudaDeviceInfo(i);
-  }
+  FreakGpu freak(kFeatureSize);
+  FastGpu fast(100000, freak.borderWidth()+5);
 
+  CudaDeviceVector<short3> keypoints_gpu(100000);
+  std::vector<short3> keypoints_cpu; 
+  fast.detect(img_gpu, 50, keypoints_gpu);
+  keypoints_gpu.download(keypoints_cpu);
+  std::sort(std::begin(keypoints_cpu), std::end(keypoints_cpu),
+      [](const short3& a, const short3& b) {
+        return a.y != b.y ? a.y < b.y : a.x < b.x;
+      });
 
-  std::cout << "Freak test" << std::endl;
+  keypoints_gpu.upload(keypoints_cpu);
+ 
+  cv::cudev::GpuMat_<uint8_t> descriptors_gpu(
+      keypoints_cpu.size(), FreakGpu::kDescriptorWidth);
+  freak.describe(
+      img_gpu, keypoints_gpu, keypoints_cpu.size(), descriptors_gpu,
+      cv::cuda::Stream::Null());
+ 
+  cv::Mat_<uint8_t> descriptors_cpu;
+  descriptors_gpu.download(descriptors_cpu);
 
-  auto tmp = cv::imread(img_file, cv::IMREAD_GRAYSCALE);
-  cv::Mat img;
-  cv::resize(tmp, img, cv::Size(1280, 720));
-
-  std::vector<cv::KeyPoint> kp = {
-    cv::KeyPoint(cv::Point2f(300, 400), 1)
-  };
-
-
-  cv::FAST(img, kp, threshold, true);
-  
-  auto kp2 = kp;
+  std::vector<cv::KeyPoint> keypoints_opencv(keypoints_cpu.size());
+  std::transform(
+      std::begin(keypoints_cpu), std::end(keypoints_cpu),
+      std::begin(keypoints_opencv),
+      [](short3 kp) {
+        cv::KeyPoint res;
+        res.pt.x = kp.x;
+        res.pt.y = kp.y;
+        res.response = kp.z;
+        return res;
+      });
 
   auto opencv_freak = cv::xfeatures2d::FREAK::create(true, false);
-  Freak freak(feature_size);
-  FreakGpu freak_gpu(feature_size);
+  cv::Mat_<uint8_t> descriptors_opencv;
+  opencv_freak->compute(img, keypoints_opencv, descriptors_opencv);
 
-  cv::Mat_<uint8_t> opencv_descriptors;
-  opencv_freak->compute(img, kp, opencv_descriptors);
-
-  const cv::Mat_<uint8_t>& desc = (const cv::Mat_<uint8_t>&)freak.describe(img, kp2);
-
-  std::vector<cv::KeyPoint> gpu_kp = kp;
-  /* { */
-  /*   kp[0], */
-  /*   kp[1], */
-  /*   kp[2], */
-  /*   kp[3], */
-  /*   kp[4] */
-  /* }; */
-
-//  const cv::Mat_<uint8_t>& desc = (const cv::Mat_<uint8_t>&)freak.describe(img, kp2);
-  cv::Mat_<cv::Vec3s> keypoints_cpu(1, gpu_kp.size());
-  for (int i = 0; i < gpu_kp.size(); ++i) {
-    keypoints_cpu(0, i) = cv::Vec3s(gpu_kp[i].pt.x, gpu_kp[i].pt.y, 0);
-  }
-
-  cv::cuda::GpuMat img_gpu(img);
-  cv::cuda::GpuMat keypoints_gpu(keypoints_cpu);
-  freak_gpu.describe(img_gpu, keypoints_gpu); 
-  auto gpu_desc = freak_gpu.descriptorsCpu();
-
-
-  /* std::cout */ 
-  /*   << "OpenCV: p=" << kp[0].pt */ 
-  /*   << ", angle=" << kp[0].angle */ 
-  /*   << ", d = " << opencv_descriptors.row(0) */
-  /*   << std::endl; */
-
-  std::cout 
-    << "New: p=" << kp2[0].pt 
-    << ", angle=" << kp2[0].angle 
-    << ", d = " << desc.row(0)
-    << std::endl;
-
-  std::cout
-    << "Gpu:"
-    << " d=" << gpu_to_linear(gpu_desc.row(0))
-    << std::endl;
-
-  for (int i=0; i < gpu_kp.size(); ++i) {
+  ASSERT_EQ(descriptors_cpu.rows, descriptors_opencv.rows);
+  for (int i=0; i < keypoints_cpu.size(); ++i) {
     bool good = !cv::countNonZero(
-        desc.row(i) != gpu_to_linear(gpu_desc.row(i)));
+        descriptors_opencv.row(i) != 
+            linearToOpenCv(gpuToLinear(descriptors_cpu.row(i))));
+    
+    ASSERT_TRUE(good)
+      << "i = " << i << ", pt = [" 
+      << keypoints_cpu[i].x << ", " << keypoints_cpu[i].y << "]" << std::endl
+      << "opencv = " << descriptors_opencv.row(i) << std::endl
+      << "gpu =    " << linearToOpenCv(gpuToLinear(descriptors_cpu.row(i)));
+  }
+};
 
-    if (!good) {
-      std::cout << "Descriptor mismatch: " << i << std::endl;
-      abort();
+class FreakGpuBenchmark : public benchmark::Fixture {
+  public:
+    FreakGpuBenchmark() : 
+        freak_(kFeatureSize),
+        keypoints_gpu_(100000) {
     }
+
+    void SetUp(const benchmark::State& s) {
+      auto base_img = cv::imread(kTestImg, cv::IMREAD_GRAYSCALE);
+      cv::Mat img;
+      cv::resize(base_img, img, {s.range(0), s.range(1)});   
+      img_gpu_.upload(img);
+
+      FastGpu fast(100000, freak_.borderWidth()+5);
+
+      std::vector<short3> keypoints_cpu; 
+      fast.detect(img_gpu_, s.range(2), keypoints_gpu_);
+      keypoints_gpu_.download(keypoints_cpu);
+      std::sort(std::begin(keypoints_cpu), std::end(keypoints_cpu),
+          [](const short3& a, const short3& b) {
+            return a.y != b.y ? a.y < b.y : a.x < b.x;
+          });
+
+      keypoints_gpu_.upload(keypoints_cpu);
+      keypoints_count_ = keypoints_gpu_.size();
+      descriptors_gpu_.create(
+          keypoints_cpu.size(), FreakGpu::kDescriptorWidth);
+    }
+
+  protected:
+    FreakGpu freak_;
+    cv::cudev::GpuMat_<uint8_t> img_gpu_;
+    CudaDeviceVector<short3> keypoints_gpu_;
+    int keypoints_count_;
+    cv::cudev::GpuMat_<uint8_t> descriptors_gpu_;
+};
+
+BENCHMARK_DEFINE_F(FreakGpuBenchmark, describe)(benchmark::State& state) {
+  auto& stream = cv::cuda::Stream::Null();
+  while (state.KeepRunning()) {
+    freak_.describe(
+        img_gpu_, keypoints_gpu_, keypoints_count_, descriptors_gpu_, stream);
+    stream.waitForCompletion();
   }
 
-  /* std::cout */ 
-  /*   << "New: p=" */ 
-  /*   << kp2[0].pt */ 
-  /*   << ", angle=" */ 
-  /*   << kp2[0].angle */
-  /*   << ", d = " << remap(desc.row(0)) */
-  /*   << std::endl; */
+  state.SetItemsProcessed(keypoints_count_);
+}
 
-  if (kp.size() != kp2.size()) {
-    std::cout 
-      << "Sizes don't match: " 
-      << kp.size() << ", " << kp2.size() 
-      << std::endl;
+BENCHMARK_REGISTER_F(FreakGpuBenchmark, describe)
+  ->Unit(benchmark::kMicrosecond)
+  ->Args({4160, 2340, 50})
+  ->Args({1280, 720, 25})
+  ->Args({1280, 720, 50});
+
+int main(int argc, char** argv) {
+  if (argc >= 2 && std::string(argv[1]) == "benchmark") {
+    benchmark::Initialize(&argc, argv);
+    benchmark::RunSpecifiedBenchmarks();
+    return 0;
   } else {
-    for (int i=0; i < kp.size(); i++) {
-      const auto& k1 = kp[i];
-      const auto& k2 = kp2[i];
-
-      if (fabs(k1.angle - k2.angle) > 1E-5) {
-        std::cout << "Angle mismatch for " << i << ": " 
-          << k1.angle << ", " << k2.angle << std::endl;
-      }
-
-      bool good = !cv::countNonZero(
-          opencv_descriptors.row(i) != linear_to_opencv(desc.row(i)));
-
-      if (!good) {
-        std::cout << "Descriptor mismatch for " << i << ": "
-          << opencv_descriptors.row(i) << ", " << linear_to_opencv(desc.row(i)) 
-          << std::endl;
-      }
-    }
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
   }
-
-  std::cout << "Done matching" << std::endl;
-
-  if (1) {
- 
-    const int kIters = 500;
-    auto t0 = std::chrono::high_resolution_clock::now();
- 
-    for (int t = 0; t < kIters; ++t) {
-      freak_gpu.describe(img_gpu, keypoints_gpu);
-    }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Descriptors: " << kp.size() << std::endl;
-    std::cout << "My GPU: " 
-      << (std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / kIters)
-      << "ms" << std::endl;
-  }
-
-  if (0) {
-    const int kIters = 500;
-    auto t0 = std::chrono::high_resolution_clock::now();
-
-    for (int t = 0; t < kIters; ++t) {
-      freak.describe(img, kp2);
-    }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Descriptors: " << kp.size() << std::endl;
-    std::cout << "My CPU: " 
-      << (std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / kIters)
-      << "ms" << std::endl;
-  }  
-  
-  if (0) {
-    const int kIters = 500;
-    auto t0 = std::chrono::high_resolution_clock::now();
-
-    for (int t = 0; t < kIters; ++t) {
-      opencv_freak->compute(img, kp, opencv_descriptors);
-    }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Descriptors: " << kp.size() << std::endl;
-    std::cout << "OpenCV: " 
-      << (std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / kIters)
-      << "ms" << std::endl;
-  }
-
-
 }

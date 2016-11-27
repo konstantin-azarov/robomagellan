@@ -5,30 +5,50 @@
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
+#include "cuda_device_vector.hpp"
 #include "freak_base.hpp"
 
 class FreakGpu : public FreakBase {
   public:
+    static const int kDescriptorWidth = 64; // bytes
+
+    // It has to be private because CUDA wants to typedef it
+    struct FreakConsts {
+      float3* points;
+      short4* orientation_pairs;
+      short2* descriptor_pairs;
+    };
+  public:
     FreakGpu(double feature_size);
+    ~FreakGpu();
 
     static bool initialize();
 
     void describe(
         const cv::cuda::GpuMat& img,
-        const cv::cuda::GpuMat& keypoints);
-
-    const cv::cudev::GpuMat& descriptors() const { return descriptors_; }
-
-    cv::Mat descriptorsCpu() {
-      cv::Mat res;
-      descriptors_.download(res);
-      return res;
-    }
+        const CudaDeviceVector<short3>& keypoints,
+        int keypoints_count,
+        cv::cudev::GpuMat_<uint8_t>& descriptors,
+        cv::cuda::Stream& stream);
+ 
+#ifdef __CUDACC__
+    friend __global__ void describeKeypoints(
+        FreakConsts consts,
+        const cv::cudev::GlobPtr<uint> integral_img,
+        const CudaDeviceVector<short3>::Dev keypoints,
+        cv::cuda::PtrStepSzb descriptors);
+    
+    friend __device__ float computePoint(
+        const FreakConsts consts,
+        const cv::cudev::GlobPtr<uint> integral_img,
+        short3 center,
+        int pt_index);
+#endif
 
   private:
-    static bool initialized_;
     cv::cudev::GpuMat_<uint> integral_;
-    cv::cuda::GpuMat descriptors_;
+ 
+    FreakConsts consts_;
 };
 
 #endif

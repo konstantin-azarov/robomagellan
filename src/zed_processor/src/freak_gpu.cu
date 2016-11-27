@@ -2,49 +2,17 @@
 
 #include <cuda_runtime.h>
 
+#include <opencv2/cudaarithm.hpp>
 #include <opencv2/core/cuda/common.hpp>
 #include <opencv2/cudev/ptr2d/glob.hpp>
 
-namespace freak_gpu {
-  const int kNumThreads = 64;
+#include "freak_gpu.hpp"
 
-  const int kNumPoints = 43;
-  const int kNumOrientations = 256;
-  const int kNumOrientationPairs = 45;
-  const int kNumDescriptorPairs = 512;
+const int kNumThreads = 64;
 
-  const int kKeyPointsPerBlock = 2;
+const int kKeyPointsPerBlock = 2;
 
-  __device__ float3 kPoints[kNumPoints * kNumOrientations];
-  __device__ short4 kOrientationPairs[kNumOrientationPairs];
-  __device__ short2 kDescriptorPairs[kNumDescriptorPairs];
-
-  __device__ float computePoint(
-      const cv::cudev::GlobPtr<uint> integral_img,
-      short3 center,
-      int pt_index) {
-    float cx = center.x + kPoints[pt_index].x;
-    float cy = center.y + kPoints[pt_index].y;
-    float sigma = kPoints[pt_index].z;
-
-    long x0 = lrintf(cx - sigma);
-    long x1 = lrintf(cx + sigma + 1);
-    long y0 = lrintf(cy - sigma);
-    long y1 = lrintf(cy + sigma + 1);
-
-    long v = (long)integral_img(y1, x1)
-           + integral_img(y0, x0)
-           - integral_img(y1, x0)
-           - integral_img(y0, x1);
-
-    /* printf( */
-    /*     "Point (%d, %d) %d -> (%ld, %ld) - (%ld, %ld) = %ld\n", */ 
-    /*     center.x, center.y, pt_index, */
-    /*     x0, y0, x1, y1, v); */
-
-    return floorf(v / ((x1 - x0)*(y1 - y0)));
-  }
-
+namespace {
   __device__ float bad_floorf(float f) {
     if (f >= 0) {
       return floorf(f);
@@ -68,182 +36,173 @@ namespace freak_gpu {
     return data[0];
   }
 
-  __global__ void describeKeypoints(
-      const cv::cudev::GlobPtr<uint> integral_img,
-      const short3* keypoints,
-      int keypoint_count,
-      cv::cuda::PtrStepSzb descriptors) {
+}
 
-    __shared__ float all_points[kKeyPointsPerBlock][kNumPoints];
-    __shared__ float2 all_orientation_weights[kKeyPointsPerBlock][kNumThreads];
-  
-    float* points = all_points[threadIdx.y];
-    float2* orientation_weight = all_orientation_weights[threadIdx.y];
+__device__ float computePoint(
+    const FreakGpu::FreakConsts consts,
+    const cv::cudev::GlobPtr<uint> integral_img,
+    short3 center,
+    int pt_index) {
+  float cx = center.x + consts.points[pt_index].x;
+  float cy = center.y + consts.points[pt_index].y;
+  float sigma = consts.points[pt_index].z;
 
-    int tid = threadIdx.x;
+  // TODO: switch to lrintf for speed maybe
+  long x0 = lroundf(cx - sigma);
+  long x1 = lroundf(cx + sigma + 1);
+  long y0 = lroundf(cy - sigma);
+  long y1 = lroundf(cy + sigma + 1);
 
-    int kp_id = blockDim.y * blockIdx.x + threadIdx.y;
-    bool active = kp_id < keypoint_count;
+  long v = (long)integral_img(y1, x1)
+         + integral_img(y0, x0)
+         - integral_img(y1, x0)
+         - integral_img(y0, x1);
 
-    // Compute points
-    if (tid < kNumPoints) {
-      points[tid] = 
-        active ? computePoint(integral_img, keypoints[kp_id], tid) : 0;
-    }
+  return floorf(v / ((x1 - x0)*(y1 - y0)));
+}
 
-    /* __syncthreads(); */
- 
-    /* if (tid == 0 && active) { */
-    /*   printf("Points:"); */
-    /*   for (int i=0; i < kNumPoints; ++i) { */
-    /*     printf(" %ld", (long)points[i]); */
-    /*   } */
-    /*   printf("\n"); */
-    /* } */
+__global__ void describeKeypoints(
+    FreakGpu::FreakConsts consts,
+    const cv::cudev::GlobPtr<uint> integral_img,
+    const CudaDeviceVector<short3>::Dev keypoints,
+    cv::cuda::PtrStepSzb descriptors) {
 
-    __syncthreads();
+  __shared__ float all_points[kKeyPointsPerBlock][FreakGpu::kPoints];
+  __shared__ float2 all_orientation_weights[kKeyPointsPerBlock][kNumThreads];
+
+  float* points = all_points[threadIdx.y];
+  float2* orientation_weight = all_orientation_weights[threadIdx.y];
+
+  int tid = threadIdx.x;
+
+  int kp_id = blockDim.y * blockIdx.x + threadIdx.y;
+  bool active = kp_id < keypoints.size();
+
+  // Compute points
+  if (tid < FreakGpu::kPoints) {
+    points[tid] = 
+        active ? computePoint(consts, integral_img, keypoints[kp_id], tid) : 0;
+  }
+
+  __syncthreads();
+
+  float2 w = make_float2(0.0f, 0.0f);
+
+  for (int i = tid; i < FreakGpu::kOrientationPairs; i += kNumThreads) {
+    const short4& p = consts.orientation_pairs[i];
+    float d = points[p.x] - points[p.y];      
+    w.x += bad_floorf(d * p.z / 2048);
+    w.y += bad_floorf(d * p.w / 2048);
+  }
+
+  /* __syncthreads(); */
+
+  orientation_weight[tid] = w;
+
+  __syncthreads();
+
+  float2 dv = reduce(orientation_weight); 
 
 
-    float2 w = make_float2(0.0f, 0.0f);
+  float angle = active ? atan2f(dv.y, dv.x) * 180.0/CV_PI : 0;
+  long orientation = (bad_floorf(FreakGpu::kOrientations * angle / 360.0 + 0.5));
+  if (orientation < 0) {
+    orientation += FreakGpu::kOrientations;
+  }
+  if (orientation >= FreakGpu::kOrientations) {
+    orientation -= FreakGpu::kOrientations;
+  }
 
-    for (int i = tid; i < kNumOrientationPairs; i += kNumThreads) {
-      const short4& p = kOrientationPairs[i];
-      float d = points[p.x] - points[p.y];      
-      w.x += bad_floorf(d * p.z / 2048);
-      w.y += bad_floorf(d * p.w / 2048);
 
-      /* if (active) { */
-      /*   printf("o %d: %d %d %d %d %f\n", i, p.x, p.y, p.z, p.w, bad_floorf(d * p.z / 2048)); */
-      /* } */
-    }
+  // Compute points for the orientation
+  if (tid < FreakGpu::kPoints) {
+    points[tid] = active 
+      ? computePoint(
+          consts, integral_img, 
+          keypoints[kp_id], 
+          tid + orientation * FreakGpu::kPoints) 
+      : 0;
+  }
 
-    /* __syncthreads(); */
+  __syncthreads();
 
-    /* if (active) { */
-    /*   printf("%d: %f %f\n", tid, w.x, w.y); */
-    /* } */
-
-    orientation_weight[tid] = w;
-
-    __syncthreads();
-
-    float2 dv = reduce(orientation_weight); 
-
-    /* if (tid == 0 && active) { */
-    /*   printf("GPU dv: (%f, %f)\n", dv.x, dv.y); */
-    /* } */
-
-    float angle = active ? atan2f(dv.y, dv.x) * 180.0/CV_PI : 0;
-    long orientation = (bad_floorf(kNumOrientations * angle / 360.0 + 0.5));
-    if (orientation < 0) {
-      orientation += kNumOrientations;
-    }
-    if (orientation >= kNumOrientations) {
-      orientation -= kNumOrientations;
-    }
-
-    /* if (tid == 0 && active) { */
-    /*   printf("GPU orientation: %f %d\n", kNumOrientations * angle / 360.0, orientation); */
-    /* } */
-
-    // Compute points for the orientation
-    if (tid < kNumPoints) {
-      points[tid] = active 
-        ? computePoint(
-            integral_img, keypoints[kp_id], tid + orientation * kNumPoints) 
-        : 0;
-    }
-
-    __syncthreads();
- 
-    /* if (tid == 0 && active) { */
-    /*   printf("GPU Points:"); */
-    /*   for (int i=0; i < kNumPoints; ++i) { */
-    /*     printf(" %ld", (long)points[i]); */
-    /*   } */
-    /*   printf("\n"); */
-    /* } */
-    /* __syncthreads(); */
-
-    if (active) {
-      // Compute the descriptor
-      uint desc_byte = 0;
-      int b = 0;
-      
-      for (int i = tid; i < kNumDescriptorPairs; i += kNumThreads, b++) {
-        short2 p = kDescriptorPairs[i];
-        int v = points[p.x] >= points[p.y];
-
-        desc_byte |= (v << b);
-      }
+  if (active) {
+    // Compute the descriptor
+    uint desc_byte = 0;
+    int b = 0;
     
-      descriptors(kp_id, tid) = desc_byte;
+    for (int i = tid; i < FreakGpu::kPairs; i += kNumThreads, b++) {
+      short2 p = consts.descriptor_pairs[i];
+      int v = points[p.x] >= points[p.y];
+
+      desc_byte |= (v << b);
     }
-  }
-
-  __host__ void describeKeypointsGpu(
-      const cv::cudev::GlobPtr<uint> integral_img,
-      const short3* keypoints,
-      int keypoint_count,
-      cv::cuda::PtrStepSzb descriptors) {
-
-    dim3 thread_block_dim(kNumThreads, kKeyPointsPerBlock);
-    dim3 grid_dim(
-        (keypoint_count + kKeyPointsPerBlock - 1)/ kKeyPointsPerBlock);
-
-    describeKeypoints<<<grid_dim, thread_block_dim>>>(
-        integral_img,
-        keypoints,
-        keypoint_count,
-        descriptors);
-
-    cudaSafeCall(cudaGetLastError());
-  }
-
-  __host__ bool initialize(
-      float3* points, int num_points,
-      short4* orientation_pairs, int num_orientation_pairs,
-      short2* descriptor_pairs, int num_descriptor_pairs) {
-
-    if (num_points != kNumPoints * kNumOrientations) {
-      printf("Num points mismatch: %d %d\n", num_points, kNumPoints);
-      return false;
-    }
-
-    void* points_dev;
-    cudaSafeCall(cudaGetSymbolAddress(&points_dev, kPoints));
-    cudaSafeCall(cudaMemcpy(
-        points_dev,
-        points, sizeof(float3) * num_points, 
-        cudaMemcpyDefault));
-
-    if (num_orientation_pairs != kNumOrientationPairs) {
-      printf("Num orientation pairs mismatch: %d %d\n", 
-          num_orientation_pairs, kNumOrientationPairs);
-      return false;
-    }
-
-    void* orientation_pairs_dev;
-    cudaSafeCall(cudaGetSymbolAddress(
-          &orientation_pairs_dev, kOrientationPairs));
-    cudaSafeCall(cudaMemcpy(
-        orientation_pairs_dev,
-        orientation_pairs, sizeof(short4) * num_orientation_pairs, 
-        cudaMemcpyDefault));
-
-    if (num_descriptor_pairs != kNumDescriptorPairs) {
-      printf("Num descriptor pairs mismatch: %d %d\n", 
-          num_descriptor_pairs, kNumDescriptorPairs);
-      return false;
-    }
-
-    void* descriptor_pairs_dev;
-    cudaSafeCall(cudaGetSymbolAddress(&descriptor_pairs_dev, kDescriptorPairs));
-    cudaSafeCall(cudaMemcpy(
-        descriptor_pairs_dev,
-        descriptor_pairs, sizeof(short2) * num_descriptor_pairs, 
-        cudaMemcpyDefault));
-
-    return true;
+  
+    descriptors(kp_id, tid) = desc_byte;
   }
 }
+
+template <class T>
+void uploadVector(const std::vector<T>& v, T** ptr) {
+  int size = sizeof(T)*v.size();
+  cudaSafeCall(cudaMalloc(ptr, size));
+  cudaSafeCall(cudaMemcpy(*ptr, v.data(), size, cudaMemcpyHostToDevice));
+};
+
+FreakGpu::FreakGpu(double feature_size) : FreakBase(feature_size) {
+  std::vector<float3> points;
+  std::vector<short4> orientation_pairs;
+  std::vector<short2> descriptor_pairs;
+
+  for (const auto& p : patterns_) {
+    points.push_back(make_float3(p.x, p.y, p.sigma));
+  }
+
+  for (const auto& p : orientation_pairs_) {
+    if (p.dx > (1 << 15) || p.dx < -(1 << 15) ||
+        p.dy > (1 << 15) || p.dy < -(1 << 15)) {
+      abort();
+    }
+    orientation_pairs.push_back(make_short4(p.i, p.j, p.dx, p.dy));
+  }
+
+  for (const auto& p : descriptor_pairs_) {
+    descriptor_pairs.push_back(make_short2(p.i, p.j));
+  }
+
+  uploadVector(points, &consts_.points);
+  uploadVector(orientation_pairs, &consts_.orientation_pairs);
+  uploadVector(descriptor_pairs, &consts_.descriptor_pairs);
+}
+
+FreakGpu::~FreakGpu() {
+  cudaSafeCall(cudaFree(consts_.points));
+  cudaSafeCall(cudaFree(consts_.orientation_pairs));
+  cudaSafeCall(cudaFree(consts_.descriptor_pairs));
+}
+
+void FreakGpu::describe(
+    const cv::cuda::GpuMat& img,
+    const CudaDeviceVector<short3>& keypoints,
+    int keypoints_count,
+    cv::cudev::GpuMat_<uint8_t>& descriptors,
+    cv::cuda::Stream& stream) {
+
+  cv::cuda::integral(img, integral_, stream);
+
+  dim3 thread_block_dim(kNumThreads, kKeyPointsPerBlock);
+  dim3 grid_dim(
+      (keypoints_count + kKeyPointsPerBlock - 1)/ kKeyPointsPerBlock);
+
+  auto cuda_stream = cv::cuda::StreamAccessor::getStream(stream);
+
+  describeKeypoints<<<grid_dim, thread_block_dim, 0, cuda_stream>>>(
+    consts_,
+    integral_, 
+    keypoints,
+    descriptors);
+
+  cudaSafeCall(cudaGetLastError());
+}
+
+

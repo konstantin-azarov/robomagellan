@@ -9,7 +9,7 @@
 
 class StereoCalibrationData;
 
-class FrameProcessor;
+class FrameData;
 
 struct CrossFrameMatch {
   CrossFrameMatch() {}
@@ -51,7 +51,7 @@ class CrossFrameProcessor {
         const StereoCalibrationData& calibration,
         const CrossFrameProcessorConfig& config);
     
-    bool process(const FrameProcessor& p1, const FrameProcessor& p2);
+    bool process(const FrameData& p1, const FrameData& p2);
     
     const cv::Mat& rot() const { return reprojection_estimator_.rot(); }
     const cv::Point3d& t() const { return reprojection_estimator_.t(); } 
@@ -86,21 +86,21 @@ class CrossFrameProcessor {
     }*/
   private:
     void match(
-        const FrameProcessor& p1, 
-        const FrameProcessor& p2,
+        const FrameData& p1, 
+        const FrameData& p2,
         std::vector<int>& matches);
 
     void buildClique_(
-        const FrameProcessor& p1, 
-        const FrameProcessor& p2);
+        const FrameData& p1, 
+        const FrameData& p2);
 
     double deltaL(
         const cv::Point3d& p1,
         const cv::Point3d& p2);
 
     void fillReprojectionFeatures_(
-        const FrameProcessor& p1,
-        const FrameProcessor& p2);
+        const FrameData& p1,
+        const FrameData& p2);
 
     double fillReprojectionErrors_(
         const cv::Mat& R, 

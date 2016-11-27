@@ -12,10 +12,24 @@
 
 using namespace std::chrono;
 
+
 FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
     calib_(&calib),
-    fast_(50000, freak_.borderWidth()),
-    freak_(64.980350) {
+    freak_(64.980350),
+    fast_(kMaxKeypoints*5, freak_.borderWidth()),
+    matcher_(kMaxKeypoints, kMaxKeypoints * 15),
+    keypoints_gpu_l_(kMaxKeypoints),
+    keypoints_gpu_r_(kMaxKeypoints),
+    keypoint_pairs_gpu_(kMaxKeypoints * 15) {
+
+  keypoints_cpu_[0].reserve(kMaxKeypoints);
+  keypoints_cpu_[1].reserve(kMaxKeypoints);
+
+  descriptors_gpu_[0].create(kMaxKeypoints, FreakGpu::kDescriptorWidth);
+  descriptors_gpu_[1].create(kMaxKeypoints, FreakGpu::kDescriptorWidth);
+
+  keypoint_pairs_.reserve(kMaxKeypoints * 15);
+
   for (int i=0; i < 2; ++i) {
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
     undistort_map_y_[i].upload(calib_->undistort_maps[i].y);
@@ -27,8 +41,14 @@ std::ostream& operator << (std::ostream& s, ushort4 v) {
   return s;
 }
 
-void FrameProcessor::process(const cv::Mat src[], int threshold) {
+void FrameProcessor::process(
+    const cv::Mat src[], 
+    int threshold,
+    FrameData& frame_data) {
   auto t0 = std::chrono::high_resolution_clock::now();
+
+  CudaDeviceVector<short3>*
+    keypoints_gpu[2] = { &keypoints_gpu_l_, &keypoints_gpu_r_ };
 
   for (int i=0; i < 2; ++i) {
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -42,35 +62,34 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
         undistort_map_y_[i], 
         cv::INTER_LINEAR);
 
-    undistorted_image_gpu_[i].download(undistorted_image_[i]);
-
     auto t2 = std::chrono::high_resolution_clock::now();
    
-    keypoints_[i].clear();
-
-    fast_.detect(undistorted_image_gpu_[i], threshold);
-    fast_.keypoints().download(keypoints_[i]);
+    fast_.detect(undistorted_image_gpu_[i], threshold, *keypoints_gpu[i]);
+    keypoints_gpu[i]->download(keypoints_cpu_[i]);
 
     sort(
-        keypoints_[i].begin(), keypoints_[i].end(), 
+        keypoints_cpu_[i].begin(), keypoints_cpu_[i].end(), 
         [this, i](const short3& a, const short3& b) -> bool {
           return a.y < b.y || (a.y == b.y && a.x < b.x);
         });
 
-    fast_.keypoints().upload(keypoints_[i]);
+    keypoints_gpu[i]->upload(keypoints_cpu_[i]);
 
     auto t3 = std::chrono::high_resolution_clock::now();
 
-    freak_.describe(undistorted_image_gpu_[i], fast_.keypoints());
+    freak_.describe(
+        undistorted_image_gpu_[i], 
+        *keypoints_gpu[i],
+        keypoints_cpu_[i].size(),
+        descriptors_gpu_[i],
+        cv::cuda::Stream::Null());
 
-    descriptors_[i].create(freak_.descriptors().size(), CV_8UC1);
-
-    freak_.descriptors().download(descriptors_[i]);
+    cv::cuda::Stream::Null().waitForCompletion();
 
     auto t4 = std::chrono::high_resolution_clock::now();
 
     std::cout 
-      << " kp = " << keypoints_[i].size()
+      << " kp = " << keypoints_cpu_[i].size()
       << " remap = " << duration_cast<milliseconds>(t2 - t1).count()
       << " detect = " << duration_cast<milliseconds>(t3 - t2).count() 
       << " extract = " << duration_cast<milliseconds>(t4 - t3).count();
@@ -78,38 +97,61 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
 
   auto t5 = std::chrono::high_resolution_clock::now();
 
-  computeKpPairs_(keypoints_[0], keypoints_[1], keypoint_pairs_);
+  computeKpPairs_(keypoints_cpu_[0], keypoints_cpu_[1], keypoint_pairs_);
 
-  computeMatches_(descriptors_[0], descriptors_[1], keypoint_pairs_, matches_);
+  int n_left = keypoints_cpu_[0].size();
+  int n_right = keypoints_cpu_[1].size();
+
+  keypoint_pairs_gpu_.upload(keypoint_pairs_);
+
+  matcher_.computeScores(
+      descriptors_gpu_[0],
+      descriptors_gpu_[1],
+      keypoint_pairs_gpu_,
+      keypoint_pairs_.size(),
+      cv::cuda::Stream::Null());
+
+  matcher_.gatherMatches(
+      n_left, n_right,
+      keypoint_pairs_,
+      0.8,
+      matches_);
 
   auto t6 = std::chrono::high_resolution_clock::now();
 
-  points_.resize(0);
-  point_keypoints_.resize(0);
-  for (int i=0; i < matches_[0].size(); ++i) {
-    int j = matches_[0][i].z;
-    if (j != 0xFFFF && matches_[1][j].z == i) {
-      auto& kp1 = keypoints_[0][i];
-      auto& kp2 = keypoints_[1][j];
+  descriptors_gpu_[0].rowRange(0, n_left).download(
+      frame_data.descriptors_left.rowRange(0, n_left));
+  descriptors_gpu_[1].rowRange(0, n_right).download(
+      frame_data.descriptors_right.rowRange(0, n_right));
 
-      if (kp1.x - kp2.x > 0) {
-        points_.push_back(
-            cv::Point3d(
-              kp1.x, (kp1.y + kp2.y)/2, std::max(0.0f, (float)(kp1.x - kp2.x))));
-        point_keypoints_.push_back(i);
-      }
+  frame_data.points.resize(0);
+  const auto& c = calib_->intrinsics;
+  for (int t = 0; t < matches_.size(); ++t) {
+    int i = matches_[t][0];
+    int j = matches_[t][1]; 
+    auto& kp_l = keypoints_cpu_[0][i];
+    auto& kp_r = keypoints_cpu_[1][j];
+
+    if (kp_l.x > kp_r.x) {
+      StereoPoint p;
+      p.world.z = c.dr / (kp_r.x - kp_l.x);
+      p.world.x = (kp_l.x - c.cx) * p.world.z / c.f;
+      p.world.y = ((kp_l.y + kp_r.y)/2.0 - c.cy) * p.world.z / c.f;
+      p.left = cv::Point2f(kp_l.x, kp_l.y);
+      p.left_i = i;
+      p.right = cv::Point2f(kp_r.x, kp_r.y);
+      p.right_i = j;
+      p.score = kp_l.z + kp_r.z;
+      frame_data.points.push_back(p);
     }
-  }
 
-  if (points_.size() > 0) {
-    cv::perspectiveTransform(points_, points_, calib_->Q);
   }
 
   auto t7 = std::chrono::high_resolution_clock::now();
   
   std::cout
     << " n_pairs = " << keypoint_pairs_.size()
-    << " n_points = " << points_.size()
+    << " n_points = " << frame_data.points.size()
     << " match = " << duration_cast<milliseconds>(t6 - t5).count() 
     << " transform = " << duration_cast<milliseconds>(t7 - t6).count() 
     << " total = " << duration_cast<milliseconds>(t7 - t0).count()
@@ -119,7 +161,7 @@ void FrameProcessor::process(const cv::Mat src[], int threshold) {
 void FrameProcessor::computeKpPairs_(
     const std::vector<short3>& kps1,
     const std::vector<short3>& kps2,
-    std::vector<short2>& keypoint_pairs) {
+    std::vector<ushort2>& keypoint_pairs) {
   keypoint_pairs.resize(0);
   int j0 = 0, j1 = 0;
   for (int i = 0; i < kps1.size(); ++i) {
@@ -135,22 +177,21 @@ void FrameProcessor::computeKpPairs_(
       auto& pt2 = kps2[j];
       assert(fabs(pt1.y - pt2.y) <= 2);
 
-      double dx = pt2.x - pt1.x;
+      double dx = pt1.x - pt2.x;
 
       if (dx > -100 && dx < 100) {
-        keypoint_pairs.push_back(make_short2(i, j));
+        keypoint_pairs.push_back(make_ushort2(i, j));
       }
     }
   }
 }
-
-
 
 void FrameProcessor::computeMatches_(
         const cv::Mat_<uchar>& d1,
         const cv::Mat_<uchar>& d2,
         const std::vector<short2>& keypoint_pairs,
         std::vector<ushort4> matches[2]) {
+
   matches[0].resize(d1.rows);
   std::fill(matches[0].begin(), matches[0].end(), make_ushort4(0xffff, 0xffff, 0xffff, 0));
   matches[1].resize(d2.rows);
@@ -184,62 +225,6 @@ void FrameProcessor::computeMatches_(
           m.z = 0xFFFF;
         }
       }
-    }
-  }
-}
-
-void FrameProcessor::match(
-           const std::vector<short3>& kps1,
-           const cv::Mat& desc1,
-           const std::vector<short3>& kps2,
-           const cv::Mat& desc2,
-           int inv,
-           std::vector<int>& matches) {
-  matches.resize(kps1.size());
-
-  int j0 = 0, j1 = 0;
-  int pairs = 0;
-
-  for (int i = 0; i < kps1.size(); ++i) {
-    auto& pt1 = kps1[i];
-
-    matches[i] = -1;
-
-    while (j0 < kps2.size() && kps2[j0].y < pt1.y - 2)
-      ++j0;
-
-    while (j1 < kps2.size() && kps2[j1].y <= pt1.y + 2)
-      ++j1;
-
-    assert(j1 >= j0);
-
-    double best_d = 1E+15, second_d = 1E+15;
-    double best_j = -1;
-
-    for (int j = j0; j < j1; j++) {
-      auto& pt2 = kps2[j];
-
-      assert(fabs(pt1.y - pt2.y) <= 2);
-
-      double dx = inv*(pt1.x - pt2.x);
-
-      if (dx > -100 && dx < 100) {
-        double dist = descriptorDist(desc1.row(i), desc2.row(j));
-        if (dist < best_d) {
-          second_d = best_d;
-          best_d = dist;
-          best_j = j;
-        } else if (dist < second_d) {
-          second_d = dist;
-        }
-        pairs++;
-      }
-    }
-   
-    //std::cout << best_d << " " << second_d << std::endl;
-
-    if (best_j > -1  && best_d / second_d < 0.8) {
-      matches[i] = best_j;
     }
   }
 }
