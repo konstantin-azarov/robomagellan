@@ -36,8 +36,15 @@ TEST(FastGpu, features) {
 
   cv::FAST(img, opencv_keypoints, threshold, true);
  
+  auto s = cv::cuda::Stream::Null();
+
   CudaDeviceVector<short3> my_keypoints_dev(kMaxKeypoints);
-  my_fast.detect(img_gpu, threshold, my_keypoints_dev);
+ 
+  my_fast.computeScores(img_gpu, threshold, s);
+  s.waitForCompletion();
+  my_fast.extract(threshold, my_keypoints_dev, s);
+  s.waitForCompletion();
+
   std::vector<short3> my_keypoints;
   my_keypoints_dev.download(my_keypoints);
 
@@ -84,6 +91,9 @@ class FastBenchmark : public benchmark::Fixture {
     cv::cuda::GpuMat keypoints_opencv_;
     CudaDeviceVector<short3> keypoints_gpu_;
     int threshold_;
+
+    cv::cuda::Stream s_;
+    cv::cuda::Event start_, end_;
 };
 
 BENCHMARK_DEFINE_F(FastBenchmark, openCv)(benchmark::State& state) {
@@ -96,10 +106,12 @@ BENCHMARK_DEFINE_F(FastBenchmark, openCv)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(FastBenchmark, mine)(benchmark::State& state) {
-  auto stream = cv::cuda::Stream::Null();
   while (state.KeepRunning()) {
-    my_fast_.detect(img_gpu_, threshold_, keypoints_gpu_);
-    cudaDeviceSynchronize();
+    keypoints_gpu_.clear();
+    my_fast_.computeScores(img_gpu_, threshold_, s_);
+    s_.waitForCompletion();
+    my_fast_.extract(threshold_, keypoints_gpu_, s_);
+    s_.waitForCompletion();
   }
 }
 

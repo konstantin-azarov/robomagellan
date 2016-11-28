@@ -181,20 +181,20 @@ FastGpu::FastGpu(int max_keypoints, int border) :
 FastGpu::~FastGpu() {
 }
 
-void FastGpu::detect(
+void FastGpu::computeScores(
     const cv::cudev::GpuMat_<uchar>& img, 
     int threshold,
-    CudaDeviceVector<short3>& res) {
+    cv::cuda::Stream& s) {
   scores_.create(img.rows, img.cols);
-  scores_.setTo(0);
+  scores_.setTo(0, s);
 
   dim3 grid_dim((img.cols + BX - 1) / BX, (img.rows + BY - 1) / BY);
   dim3 thread_block_dim(BX, BY);
 
-  tmp_keypoints_.clear();
-  res.clear();
+  tmp_keypoints_.clear(s);
 
-  compute_scores<<<grid_dim, thread_block_dim>>>(
+  auto cuda_stream = cv::cuda::StreamAccessor::getStream(s);
+  compute_scores<<<grid_dim, thread_block_dim, 0, cuda_stream>>>(
       img, 
       make_short2(img.cols, img.rows),
       threshold, 
@@ -202,10 +202,26 @@ void FastGpu::detect(
       scores_, 
       tmp_keypoints_);
 
-  int n_keypoints = tmp_keypoints_.size();
+  tmp_keypoints_.sizeAsync(n_tmp_keypoints_, s);
+}
 
-  nonmax_supression<<<(n_keypoints + 63)/64, 64>>>(
+void FastGpu::extract(
+    int threshold,
+    CudaDeviceVector<short3>& res,
+    cv::cuda::Stream& s) {
+  res.clear(s);
+  auto cuda_stream = cv::cuda::StreamAccessor::getStream(s);
+  nonmax_supression<<<(n_tmp_keypoints_ + 63)/64, 64, 0, cuda_stream>>>(
       scores_, tmp_keypoints_, res);
 }
 
+void FastGpu::detect(
+    const cv::cudev::GpuMat_<uchar>& img, 
+    int threshold,
+    CudaDeviceVector<short3>& res) {
+  auto s = cv::cuda::Stream::Null();
 
+  computeScores(img, threshold, s);
+  s.waitForCompletion();
+  extract(threshold, res, s);
+}

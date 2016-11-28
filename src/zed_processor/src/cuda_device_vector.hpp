@@ -68,12 +68,25 @@ class CudaDeviceVector {
       cudaSafeCall(cudaMemset(dev_.size_ptr_, 0, sizeof(int)));
     }
 
+    __host__ void clear(cv::cuda::Stream& s) {
+      cudaSafeCall(cudaMemsetAsync(
+            dev_.size_ptr_, 0, sizeof(int), 
+            cv::cuda::StreamAccessor::getStream(s)));
+    }
+
     __host__ int size() const {
       int size;
       cudaSafeCall(cudaMemcpy(
             &size, dev_.size_ptr_, sizeof(int), 
             cudaMemcpyDeviceToHost));
       return std::min(size, dev_.max_size_);
+    }
+
+    __host__ void sizeAsync(int& res, cv::cuda::Stream& s) {
+      cudaSafeCall(cudaMemcpyAsync(
+            &res, dev_.size_ptr_, sizeof(int),
+            cudaMemcpyDeviceToHost,
+            cv::cuda::StreamAccessor::getStream(s)));
     }
 
     __host__ void download(std::vector<T>& dst) const {
