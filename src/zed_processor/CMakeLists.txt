@@ -26,6 +26,7 @@ include_directories("/usr/include/libusb-1.0")
 
 ## 3rd party libs
 include_directories("../../3rdparty/benchmark/include")
+include_directories("../../3rdparty/cub")
 link_directories("../../3rdparty/benchmark/build/src")
 
 find_package(catkin REQUIRED COMPONENTS
