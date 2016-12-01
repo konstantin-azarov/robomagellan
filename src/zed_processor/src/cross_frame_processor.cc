@@ -16,7 +16,10 @@ CrossFrameProcessor::CrossFrameProcessor(
 
 bool CrossFrameProcessor::process(
     const FrameData& p1, 
-    const FrameData& p2) {
+    const FrameData& p2,
+    Eigen::Quaterniond& r, 
+    Eigen::Vector3d& t,
+    Eigen::Matrix3d* t_cov) {
   auto t0 = std::chrono::high_resolution_clock::now();
 
   const auto& points1 = p1.points;
@@ -82,7 +85,7 @@ bool CrossFrameProcessor::process(
   buildClique_(p1, p2);
   auto t3 = std::chrono::high_resolution_clock::now();
 
-  if (!estimatePose()) {
+  if (!estimatePose_(r, t, t_cov)) {
     return false;
   }
 
@@ -206,33 +209,39 @@ void CrossFrameProcessor::fillReprojectionFeatures_(
     const FrameData& p1,
     const FrameData& p2) {
 
+  auto cv_to_eigen = [](const cv::Point2d& p) {
+    return Eigen::Vector2d(p.x, p.y);
+  };
+
   all_reprojection_features_.resize(full_matches_.size());
   for (int i : filtered_matches_) {
     const auto& m = full_matches_[i];
 
     auto& f = all_reprojection_features_[i];
 
-    f.r1 = m.p1;
-    f.r2 = m.p2;
-    f.s1l = p1.points[m.i1].left;
-    f.s1r = p1.points[m.i1].right;
-    f.s2l = p2.points[m.i2].left;
-    f.s2r = p2.points[m.i2].right;
+    f.r2 = Eigen::Vector3d(m.p1.x, m.p1.y, m.p1.z);
+    f.r1 = Eigen::Vector3d(m.p2.x, m.p2.y, m.p2.z);
+    f.s2l = cv_to_eigen(p1.points[m.i1].left);
+    f.s2r = cv_to_eigen(p1.points[m.i1].right);
+    f.s1l = cv_to_eigen(p2.points[m.i2].left);
+    f.s1r = cv_to_eigen(p2.points[m.i2].right);
   }
 }
 
 double CrossFrameProcessor::fillReprojectionErrors_(
-    const cv::Mat& R, 
-    const cv::Point3d& tm,
+    const Eigen::Quaterniond& r, 
+    const Eigen::Vector3d& tm,
     std::vector<ReprojectionFeatureWithError>& reprojection_features) {
   double total = 0;
 
   for (auto& f : reprojection_features) {
-    auto p1 = projectPoint(calibration_.intrinsics, R.t()*(f.r2 - tm));
-    auto p2 = projectPoint(calibration_.intrinsics, R*f.r1 + tm);
+    auto p1 = projectPoint(calibration_.intrinsics, r.inverse()*(f.r2 - tm));
+    auto p2 = projectPoint(calibration_.intrinsics, r*f.r1 + tm);
 
-    double e1 = norm2(p1.first - f.s1l) + norm2(p1.second - f.s1r); 
-    double e2 = norm2(p2.first - f.s2l) + norm2(p2.second - f.s2r);
+    double e1 = (p1.first - f.s1l).squaredNorm() + 
+      (p1.second - f.s1r).squaredNorm(); 
+    double e2 = (p2.first - f.s2l).squaredNorm() + 
+      (p2.second - f.s2r).squaredNorm();
 
     f.error = e1 + e2;
     total += e1 + e2;
@@ -241,17 +250,19 @@ double CrossFrameProcessor::fillReprojectionErrors_(
   return total / reprojection_features.size();
 }
 
-bool CrossFrameProcessor::estimatePose() {
+bool CrossFrameProcessor::estimatePose_(
+    Eigen::Quaterniond& r, 
+    Eigen::Vector3d& t,
+    Eigen::Matrix3d* t_cov) {
   if (clique_reprojection_features_.size() < 
         config_.min_features_for_estimation) {
     return false;
   }
 
-  estimateOne(clique_reprojection_features_);
+  estimateOne_(clique_reprojection_features_, r, t, nullptr);
 
   auto initial_reprojection_error = fillReprojectionErrors_(
-      reprojection_estimator_.rot(), 
-      reprojection_estimator_.t(),
+      r, t,
       clique_reprojection_features_);
 
   std::sort(
@@ -270,13 +281,12 @@ bool CrossFrameProcessor::estimatePose() {
         filtered_reprojection_features_.push_back(f);
       }
     }
-    estimateOne(filtered_reprojection_features_);
+    estimateOne_(filtered_reprojection_features_, r, t, nullptr);
   }
 
   // Reestimate using all good features.
   fillReprojectionErrors_(
-      reprojection_estimator_.rot(), 
-      reprojection_estimator_.t(),
+      r, t,
       all_reprojection_features_);
   filtered_reprojection_features_.resize(0);
   for (const auto& f : all_reprojection_features_) {
@@ -285,10 +295,9 @@ bool CrossFrameProcessor::estimatePose() {
     }
   }
 
-  estimateOne(filtered_reprojection_features_);
+  estimateOne_(filtered_reprojection_features_, r, t, t_cov);
   double final_error = fillReprojectionErrors_(
-      reprojection_estimator_.rot(), 
-      reprojection_estimator_.t(),
+      r, t,
       filtered_reprojection_features_);
 
   std::cout
@@ -305,8 +314,11 @@ bool CrossFrameProcessor::estimatePose() {
   return success;
 }
 
-void CrossFrameProcessor::estimateOne(
-    const std::vector<ReprojectionFeatureWithError>& features) {
+void CrossFrameProcessor::estimateOne_(
+    const std::vector<ReprojectionFeatureWithError>& features,
+    Eigen::Quaterniond& r, 
+    Eigen::Vector3d& t,
+    Eigen::Matrix3d* t_cov) {
   tmp_reprojection_features_.resize(0);
 
   if (features.size() < 5) {
@@ -318,5 +330,5 @@ void CrossFrameProcessor::estimateOne(
     tmp_reprojection_features_.push_back(f);
   }
 
-  reprojection_estimator_.estimate(tmp_reprojection_features_);
+  reprojection_estimator_.estimate(tmp_reprojection_features_, r, t, t_cov);
 }

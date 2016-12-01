@@ -1,8 +1,11 @@
+#include <assert.h>
+
 #include <boost/program_options.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/cuda.hpp>
 
-#include <assert.h>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 #include "average.hpp"
 #define BACKWARD_HAS_DW 1
@@ -23,12 +26,14 @@
 
 using namespace std;
 
+namespace e = Eigen;
 namespace po = boost::program_options;
 
 backward::SignalHandling sh;
 
 int main(int argc, char** argv) {
   string video_file, direction_file, calib_file, mono_calib_file;
+  string path_trace_file;
   int start;
   bool debug;
   int frame_count;
@@ -54,6 +59,9 @@ int main(int argc, char** argv) {
        po::value<string>(&mono_calib_file)->default_value(
          "data/calib_phone.yml"),
        "path to the calibration file")
+      ("path-trace-file",
+       po::value<string>(&path_trace_file),
+       "save calculated path to the file")
       ("debug",
        po::bool_switch(&debug)->default_value(false),
        "Start in debug mode.");
@@ -95,10 +103,10 @@ int main(int argc, char** argv) {
   CrossFrameProcessorConfig cross_processor_config;
   CrossFrameProcessor cross_processor(calib, cross_processor_config);
 
-  DirectionTrackerSettings settings;
-  DirectionTarget target = DirectionTarget::read(direction_file);
-  DirectionTracker direction_tracker(settings, &calib.intrinsics);
-  direction_tracker.setTarget(&target);
+  /* DirectionTrackerSettings settings; */
+  /* DirectionTarget target = DirectionTarget::read(direction_file); */
+  /* DirectionTracker direction_tracker(settings, &calib.intrinsics); */
+  /* direction_tracker.setTarget(&target); */
 
   double frameDt = 1.0/60.0;
 
@@ -107,8 +115,16 @@ int main(int argc, char** argv) {
 
   std::vector<cv::Point2d> img_keypoints;
 
-  cv::Mat camR = cv::Mat::eye(3, 3, CV_64F);
-  cv::Point3d camT = cv::Point3d(0, 0, 0);
+  e::Quaterniond cam_r(1, 0, 0, 0);
+  e::Vector3d cam_t(0, 0, 0);
+
+  FILE* trace_file = nullptr;
+  if (!path_trace_file.empty()) {
+    trace_file = fopen(path_trace_file.c_str(), "w");
+    if (trace_file == nullptr) {
+      abort();
+    }
+  }
 
   bool done = false;
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
@@ -149,26 +165,41 @@ int main(int argc, char** argv) {
     timer.mark("dir");
 
     if (frame_index > 0) {
-      bool ok = cross_processor.process(prev_frame, cur_frame);
+      e::Quaterniond d_r;
+      e::Vector3d d_t;
+      e::Matrix3d t_cov;
+      bool ok = cross_processor.process(
+          prev_frame, cur_frame, d_r, d_t, &t_cov);
 
       timer.mark("cross");
 
       if (ok) {
-        const cv::Mat_<double> cov(cross_processor.t_cov());
-        if (!(cov[0][0] < 5 && cov[1][1] < 5 && cov[2][2] < 5)) {
+        if (!(t_cov(0, 0) < 5 && t_cov(1, 1) < 5 && t_cov(2, 2) < 5)) {
           std::cout << "FAIL";
-          std::cout << "T_cov = " << cross_processor.t_cov() << std::endl; 
+          std::cout << "T_cov = " << t_cov << std::endl; 
         } else {
-          camT = cross_processor.rot()*camT + cross_processor.t();
-          camR = cross_processor.rot()*camR;
+          cam_t += cam_r*d_t;
+          cam_r = cam_r*d_r;
+          cam_r.normalize();
         }
         
-        cv::Mat tmp;
-        cv::Rodrigues(camR, tmp);
-        std::cout << "R = " << tmp.t() << endl;
-        std::cout << "T = " << camT << endl; 
+        auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI;
+        std::cout << "yaw = " << ypr.x() 
+                  << ", pitch = " << ypr.y() 
+                  << ", roll = " << ypr.z() << endl;
+        std::cout << "T = " << cam_t.transpose() << endl; 
         /* std::cout << "T_cov = " << cross_processor.t_cov() << std::endl; */
+
+        if (trace_file != nullptr) {
+          fprintf(trace_file, "%d 1 %.5f %.5f %.5f %.5f %.5f %.5f %.5f\n",
+              global_frame_index,
+              cam_t.x(), cam_t.y(), cam_t.z(), 
+              cam_r.w(), cam_r.x(), cam_r.y(), cam_r.z());
+        }
       } else {
+        if (trace_file) {
+          fprintf(trace_file, "%d 0\n", global_frame_index);
+        }
         std::cout << "FAIL" << std::endl;
       }
     }
@@ -187,6 +218,10 @@ int main(int argc, char** argv) {
       /*   break; */
       /* } */
     }
+  }
+
+  if (trace_file != nullptr) {
+    fclose(trace_file);
   }
 
   return 0;

@@ -36,8 +36,8 @@ bool operator == (const ushort2& a, const ushort2& b) {
   return a.x == b.x && a.y == b.y;
 }
 
-std::vector<ushort2> randomPairs(int n_descs, int n_pairs) {
-  std::vector<ushort2> res;
+PinnedVector<ushort2> randomPairs(int n_descs, int n_pairs) {
+  PinnedVector<ushort2> res;
   std::default_random_engine rand;
   std::uniform_int_distribution<> dist(0, (n_descs*(n_descs - 1)) - 1);
 
@@ -64,7 +64,7 @@ std::vector<ushort2> randomPairs(int n_descs, int n_pairs) {
 std::vector<cv::Vec2s> computeMatches(
     const cv::Mat_<uchar>& d1,
     const cv::Mat_<uchar>& d2,
-    const std::vector<ushort2>& pairs,
+    const PinnedVector<ushort2>& pairs,
     float threshold_ratio) {
   int n1 = d1.rows, n2 = d2.rows;
 
@@ -144,7 +144,7 @@ TEST(StereoMatcherTest, random) {
     for (int t = 0; t < niters; ++t) {
       cv::Mat_<uchar> d1 = randomDescriptors(ndescs);
       cv::Mat_<uchar> d2 = randomDescriptors(ndescs);
-      std::vector<ushort2> pairs = randomPairs(ndescs, npairs);
+      PinnedVector<ushort2> pairs = randomPairs(ndescs, npairs);
       CudaDeviceVector<ushort2> pairs_gpu(pairs.size());
       pairs_gpu.upload(pairs);
 
@@ -191,7 +191,7 @@ class MatcherBenchmarkFixture : public benchmark::Fixture {
   protected:
     Matcher matcher_;
     cv::cudev::GpuMat_<uint8_t> d1_, d2_;
-    std::vector<ushort2> pairs_cpu_;
+    PinnedVector<ushort2> pairs_cpu_;
     CudaDeviceVector<ushort2> pairs_gpu_;
     std::vector<cv::Vec2s> matches_;
 };

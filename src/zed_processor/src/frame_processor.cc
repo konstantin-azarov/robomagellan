@@ -202,6 +202,7 @@ void FrameProcessor::process(
   auto t7 = std::chrono::high_resolution_clock::now();
   
   std::cout
+    << " features = (" << n_left << ", " << n_right << ")"
     << " n_pairs = " << keypoint_pairs_.size()
     << " n_points = " << frame_data.points.size()
     << " upload = " << duration_cast<milliseconds>(t1 - t0).count()

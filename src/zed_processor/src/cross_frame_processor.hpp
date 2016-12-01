@@ -1,6 +1,8 @@
 #ifndef __CROSS_FRAME_PROCESSOR__HPP__
 #define __CROSS_FRAME_PROCESSOR__HPP__
 
+#include <Eigen/Geometry>
+
 #include <vector>
 
 #include "clique.hpp"
@@ -51,12 +53,12 @@ class CrossFrameProcessor {
         const StereoCalibrationData& calibration,
         const CrossFrameProcessorConfig& config);
     
-    bool process(const FrameData& p1, const FrameData& p2);
-    
-    const cv::Mat& rot() const { return reprojection_estimator_.rot(); }
-    const cv::Point3d& t() const { return reprojection_estimator_.t(); } 
-    const cv::Mat& t_cov() const { return reprojection_estimator_.t_cov(); }
-
+    bool process(
+        const FrameData& p1, const FrameData& p2,
+        Eigen::Quaterniond& r, 
+        Eigen::Vector3d& t,
+        Eigen::Matrix3d* t_cov);
+   
     const std::vector<CrossFrameMatch>& fullMatches() const { 
       return full_matches_; 
     }
@@ -103,13 +105,20 @@ class CrossFrameProcessor {
         const FrameData& p2);
 
     double fillReprojectionErrors_(
-        const cv::Mat& R, 
-        const cv::Point3d& tm,
+        const Eigen::Quaterniond& r, 
+        const Eigen::Vector3d& tm,
         std::vector<ReprojectionFeatureWithError>& reprojection_features);
 
-    bool estimatePose();
+    bool estimatePose_(
+        Eigen::Quaterniond& r, 
+        Eigen::Vector3d& t,
+        Eigen::Matrix3d* t_cov);
 
-    void estimateOne(const std::vector<ReprojectionFeatureWithError>& features);
+    void estimateOne_(
+        const std::vector<ReprojectionFeatureWithError>& features,
+        Eigen::Quaterniond& r, 
+        Eigen::Vector3d& t,
+        Eigen::Matrix3d* t_cov);
 
   private:
     CrossFrameProcessorConfig config_;

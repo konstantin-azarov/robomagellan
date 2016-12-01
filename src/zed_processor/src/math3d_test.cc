@@ -1,8 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <Eigen/Geometry>
+
 #include <opencv2/opencv.hpp>
 
 #include "math3d.hpp"
+
+namespace e = Eigen;
 
 const double EPS = 1E-9;
 
@@ -34,30 +38,51 @@ TEST(IntersectLines, threeLinesNotAtOrigin) {
 TEST(RotToEuler, yaw) {
   double a = 30*M_PI/180.0;
 
-  ASSERT_EQ(rotToEuler(rotY(a)), cv::Vec3d(a, 0, 0));
-  ASSERT_EQ(rotToEuler(rotY(-a)), cv::Vec3d(-a, 0, 0));
+  ASSERT_EQ(
+      rotToYawPitchRoll(
+        e::Quaterniond(e::AngleAxisd(a, e::Vector3d::UnitY()))), 
+      e::Vector3d(a, 0, 0));
+  ASSERT_EQ(
+      rotToYawPitchRoll(
+        e::Quaterniond(e::AngleAxisd(-a, e::Vector3d::UnitY()))), 
+      e::Vector3d(-a, 0, 0));
 }
 
 TEST(RotToEuler, pitch) {
   double a = 30*M_PI/180.0;
 
-  ASSERT_EQ(rotToEuler(rotX(a)), cv::Vec3d(0, a, 0));
-  ASSERT_EQ(rotToEuler(rotX(-a)), cv::Vec3d(0, -a, 0));
+  ASSERT_EQ(
+      rotToYawPitchRoll(
+        e::Quaterniond(e::AngleAxisd(a, e::Vector3d::UnitX()))), 
+      e::Vector3d(0, a, 0));
+  ASSERT_EQ(
+      rotToYawPitchRoll(
+        e::Quaterniond(e::AngleAxisd(-a, e::Vector3d::UnitX()))), 
+      e::Vector3d(0, -a, 0));
 }
 
 TEST(RotToEuler, roll) {
   double a = 30*M_PI/180.0;
 
-  ASSERT_EQ(rotToEuler(rotZ(a)), cv::Vec3d(0, 0, a));
-  ASSERT_EQ(rotToEuler(rotZ(-a)), cv::Vec3d(0, 0, -a));
+  ASSERT_EQ(
+      rotToYawPitchRoll(
+        e::Quaterniond(e::AngleAxisd(a, e::Vector3d::UnitZ()))), 
+      e::Vector3d(0, 0, a));
+  ASSERT_EQ(
+      rotToYawPitchRoll(
+        e::Quaterniond(e::AngleAxisd(-a, e::Vector3d::UnitZ()))), 
+      e::Vector3d(0, 0, -a));
 }
 
 TEST(RotToEuler, combination) {
   double a = 30*M_PI/180.0;
 
-  ASSERT_LT(
-      cv::norm(rotToEuler(rotY(a)*rotX(a/2)*rotZ(a/3)), cv::Vec3d(a, a/2, a/3)),
-      1E-6);
+  auto res = rotToYawPitchRoll(
+        e::AngleAxisd(a, e::Vector3d::UnitY())*
+        e::AngleAxisd(a/2, e::Vector3d::UnitX())*
+        e::AngleAxisd(a/3, e::Vector3d::UnitZ()));
+
+  ASSERT_LT((res - e::Vector3d(a, a/2, a/3)).norm(), 1E-6);
 }
 
 int main(int argc, char** argv) {

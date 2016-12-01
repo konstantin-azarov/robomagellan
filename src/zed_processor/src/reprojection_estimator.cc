@@ -44,16 +44,16 @@ template <template <class T> class Transform>
 class StereoReprojectionError {
   public:
     StereoReprojectionError(
-        const cv::Point3d& r, 
-        const cv::Point2d& sl, 
-        const cv::Point2d& sr,
+        const Eigen::Vector3d& r, 
+        const Eigen::Vector2d& sl, 
+        const Eigen::Vector2d& sr,
         const StereoIntrinsics* camera)
         : r_(r), sl_(sl), sr_(sr), c_(camera) {
     }
 
     template <class T>
     bool operator()(const T* const q, const T* const t, T* e) const {
-      T p0[3] = { T(r_.x), T(r_.y), T(r_.z) };
+      T p0[3] = { T(r_.x()), T(r_.y()), T(r_.z()) };
       T p[3];
 
       Transform<T>::t(p0, q, t, p);
@@ -62,17 +62,17 @@ class StereoReprojectionError {
       T u = T(c_->f) * p[0] / p[2] + T(c_->cx); 
       T v = T(c_->f) * p[1] / p[2] + T(c_->cy);
 
-      e[0] = u - T(sl_.x);
-      e[1] = v - T(sl_.y);
-      e[2] = u + T(c_->dr) / p[2] - T(sr_.x);
-      e[3] = v - T(sr_.y);
+      e[0] = u - T(sl_.x());
+      e[1] = v - T(sl_.y());
+      e[2] = u + T(c_->dr) / p[2] - T(sr_.x());
+      e[3] = v - T(sr_.y());
 
       return true;
     }
 
   private:
-    cv::Point3d r_;
-    cv::Point2d sl_, sr_;
+    Eigen::Vector3d r_;
+    Eigen::Vector2d sl_, sr_;
     const StereoIntrinsics* c_;
 };
 
@@ -80,8 +80,8 @@ template <template <class T> class Transform>
 class MonoReprojectionError {
   public:
     MonoReprojectionError(
-        const cv::Point3d& r,
-        const cv::Point2d& s,
+        const Eigen::Vector3d& r,
+        const Eigen::Vector2d& s,
         const MonoIntrinsics* camera) 
         : r_(r), s_(s), c_(camera) {
     }
@@ -89,7 +89,7 @@ class MonoReprojectionError {
     template <class T>
     bool operator()(const T* const q, T* e) const {
       T t[3] = { T(0), T(0), T(0) };
-      T p0[3] = { T(r_.x), T(r_.y), T(r_.z) };
+      T p0[3] = { T(r_.x()), T(r_.y()), T(r_.z()) };
       T p[3];
 
       Transform<T>::t(p0, q, t, p);
@@ -97,15 +97,15 @@ class MonoReprojectionError {
       T u = T(c_->f) * p[0] / p[2] + T(c_->cx); 
       T v = T(c_->f) * p[1] / p[2] + T(c_->cy);
       
-      e[0] = u - T(s_.x);
-      e[1] = v - T(s_.y);
+      e[0] = u - T(s_.x());
+      e[1] = v - T(s_.y());
 
       return true;
     }
 
   private:
-    cv::Point3d r_;
-    cv::Point2d s_;
+    Eigen::Vector3d r_;
+    Eigen::Vector2d s_;
     const MonoIntrinsics* c_;
 };
 
@@ -123,16 +123,19 @@ StereoReprojectionEstimator::StereoReprojectionEstimator(
 }
 
 bool StereoReprojectionEstimator::estimate(
-    const std::vector<StereoReprojectionFeature>& features) {
+    const std::vector<StereoReprojectionFeature>& features,
+    Eigen::Quaterniond& r, 
+    Eigen::Vector3d& t,
+    Eigen::Matrix3d* t_cov) {
 
   double q[4] = { 1, 0, 0, 0 };
-  double t[3] = { 0, 0, 0 };
-  std::vector<double*> allParameterBlocks = { q, t };
+  double t_raw[3] = { 0, 0, 0 };
+  std::vector<double*> allParameterBlocks = { q, t_raw };
 
   Problem problem;
 
   problem.AddParameterBlock(q, 4, new QuaternionParameterization());
-  problem.AddParameterBlock(t, 3);
+  problem.AddParameterBlock(t_raw, 3);
 
   for (auto f : features) {
     problem.AddResidualBlock(
@@ -154,27 +157,25 @@ bool StereoReprojectionEstimator::estimate(
   Solver::Summary summary;
   Solve(options, &problem, &summary);
 
-  std::vector<std::pair<const double*, const double*> > covariance_blocks;
-  covariance_blocks.push_back(std::make_pair(t, t));
+  if (t_cov != nullptr) {
+    std::vector<std::pair<const double*, const double*> > covariance_blocks;
+    covariance_blocks.push_back(std::make_pair(t_raw, t_raw));
 
-  t_cov_.create(3, 3, CV_64F);
-  
-  Covariance::Options cov_options;
-  Covariance covariance(cov_options);
+    Covariance::Options cov_options;
+    Covariance covariance(cov_options);
 
-  if (covariance.Compute(covariance_blocks, &problem)) {
-    covariance.GetCovarianceBlock(t, t, reinterpret_cast<double*>(t_cov_.data));
-  } else {
-    t_cov_ = cv::Mat::zeros(3, 3, CV_64F);
+    if (covariance.Compute(covariance_blocks, &problem)) {
+      Eigen::Matrix<double, 3, 3, Eigen::RowMajor> tmp;
+      covariance.GetCovarianceBlock(
+          t_raw, t_raw, tmp.data());
+      *t_cov = tmp;
+    } else {
+      *t_cov = Eigen::Matrix3d::Zero();
+    }
   }
-  
-
-  rot_.create(3, 3, CV_64F);
-  QuaternionToRotation(q, reinterpret_cast<double*>(rot_.data));
-
-  t_.x = t[0];
-  t_.y = t[1];
-  t_.z = t[2];
+    
+  r = Eigen::Quaterniond(q[0], q[1], q[2], q[3]);
+  t = Eigen::Vector3d(t_raw);
   
   return true;
 }
@@ -188,14 +189,15 @@ MonoReprojectionEstimator::MonoReprojectionEstimator(
 }
 
 bool MonoReprojectionEstimator::estimate(
-    const std::vector<MonoReprojectionFeature>& features) {
+    const std::vector<MonoReprojectionFeature>& features,
+    Eigen::Quaterniond& q) {
   
-  double q[4] = { 1, 0, 0, 0 };
-  std::vector<double*> all_parameter_blocks = { q } ;
+  double q_raw[4] = { 1, 0, 0, 0 };
+  std::vector<double*> all_parameter_blocks = { q_raw } ;
 
   Problem problem;
 
-  problem.AddParameterBlock(q, 4, new QuaternionParameterization());
+  problem.AddParameterBlock(q_raw, 4, new QuaternionParameterization());
 
   for (auto f : features) {
     problem.AddResidualBlock(
@@ -217,8 +219,7 @@ bool MonoReprojectionEstimator::estimate(
   Solver::Summary summary;
   Solve(options, &problem, &summary);
 
-  rot_.create(3, 3, CV_64F);
-  QuaternionToRotation(q, reinterpret_cast<double*>(rot_.data));
+  q = Eigen::Quaterniond(q_raw[0], q_raw[1], q_raw[2], q_raw[3]);
 
   return true;
 }

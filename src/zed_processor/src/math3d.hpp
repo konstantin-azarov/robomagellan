@@ -4,29 +4,26 @@
 #include <assert.h>
 #include <opencv2/opencv.hpp>
 
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+
 #include "calibration_data.hpp"
 
 cv::Point3d operator * (const cv::Mat& m, const cv::Point3d& p);
 
 cv::Point2f projectPoint(const cv::Mat& m, const cv::Point3d& p);
 
-std::pair<cv::Point2d, cv::Point2d> projectPoint(
+std::pair<Eigen::Vector2d, Eigen::Vector2d> projectPoint(
     const StereoIntrinsics& camera, 
-    const cv::Point3d& p);
+    const Eigen::Vector3d& p);
 
 cv::Point2d projectPoint(const MonoIntrinsics& camera, const cv::Point3d& p);
 
-cv::Mat rotX(double angle);
-
-cv::Mat rotY(double angle);
-
-cv::Mat rotZ(double angle);
-
 /**
- * Convert a rotation matrix (from current coordinate system to reference 
- * coordinate system) to yaw/pitch/roll.
+ * Convert a quaternion (from current coordinate system to reference 
+ * coordinate system) to yaw/pitch/roll (in this order around local axes).
  */
-cv::Vec3d rotToEuler(const cv::Mat& r);
+Eigen::Vector3d rotToYawPitchRoll(const Eigen::Quaterniond& r);
 
 bool compareMats(const cv::Mat& l, const cv::Mat& r, double eps);
 

@@ -1,19 +1,21 @@
 #ifndef __REPROJECTION_ESTIMATOR__HPP__
 #define __REPROJECTION_ESTIMATOR__HPP__
 
+#include <Eigen/Geometry>
+
 #include "opencv2/opencv.hpp"
 
 struct StereoIntrinsics;
 struct MonoIntrinsics;
 
 struct MonoReprojectionFeature {
-  cv::Point3d r1, r2;
-  cv::Point2d s1, s2; 
+  Eigen::Vector3d r1, r2;
+  Eigen::Vector2d s1, s2; 
 };
 
 struct StereoReprojectionFeature {
-  cv::Point3d r1, r2;
-  cv::Point2d s1l, s1r, s2l, s2r;
+  Eigen::Vector3d r1, r2;
+  Eigen::Vector2d s1l, s1r, s2l, s2r;
 };
 
 // Find rotation and translation that transforms the first set of points into 
@@ -26,18 +28,14 @@ class StereoReprojectionEstimator {
     StereoReprojectionEstimator(
         const StereoIntrinsics* intrinsics);
 
-    bool estimate(const std::vector<StereoReprojectionFeature>& features);
-
-    const cv::Mat& rot() const { return rot_; }
-
-    const cv::Point3d& t() const { return t_; }
-    const cv::Mat& t_cov() const { return t_cov_; }
+    bool estimate(
+        const std::vector<StereoReprojectionFeature>& features,
+        Eigen::Quaterniond& r, 
+        Eigen::Vector3d& t,
+        Eigen::Matrix3d* t_cov);
 
   private:
     const StereoIntrinsics* intrinsics_;
-    cv::Mat rot_;
-    cv::Point3d t_;
-    cv::Mat t_cov_;
 };
 
 
@@ -51,14 +49,12 @@ class MonoReprojectionEstimator {
     MonoReprojectionEstimator(
         const MonoIntrinsics* intrinsics);
 
-    bool estimate(const std::vector<MonoReprojectionFeature>& features);
-
-    const cv::Mat& rot() const { return rot_; }
+    bool estimate(
+        const std::vector<MonoReprojectionFeature>& features,
+        Eigen::Quaterniond& r);
 
   private:
     const MonoIntrinsics* intrinsics_;
-
-    cv::Mat rot_;
 };
 
 #endif

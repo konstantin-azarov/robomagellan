@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <opencv2/core/cuda.hpp>
+#include <opencv2/cudaarithm.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/features2d.hpp>
@@ -18,7 +19,8 @@
 
 backward::SignalHandling sh;
 
-const std::string kTestImg = "src/zed_processor/test_data/fast_test_image.png";
+const std::string kTestImg = 
+    "../../src/zed_processor/test_data/fast_test_image.png";
 const float kFeatureSize = 64.980350;
 
 cv::Mat_<uint8_t> linearToOpenCv(cv::Mat_<uint8_t> m) {
@@ -58,7 +60,13 @@ cv::Mat_<uint8_t> gpuToLinear(cv::Mat_<uint8_t> m) {
 
 TEST(FreakGpu, describe) {
   auto img = cv::imread(kTestImg, cv::IMREAD_GRAYSCALE);
+  if (img.data == nullptr) {
+    abort();
+  }
   cv::cudev::GpuMat_<uint8_t> img_gpu(img);
+  cv::cudev::GpuMat_<uint> integral_img;
+
+  cv::cuda::integral(img_gpu, integral_img);
 
   FreakGpu freak(kFeatureSize);
   FastGpu fast(100000, freak.borderWidth()+5);
@@ -73,11 +81,11 @@ TEST(FreakGpu, describe) {
       });
 
   keypoints_gpu.upload(keypoints_cpu);
- 
+
   cv::cudev::GpuMat_<uint8_t> descriptors_gpu(
       keypoints_cpu.size(), FreakGpu::kDescriptorWidth);
   freak.describe(
-      img_gpu, keypoints_gpu, keypoints_cpu.size(), descriptors_gpu,
+      integral_img, keypoints_gpu, keypoints_cpu.size(), descriptors_gpu,
       cv::cuda::Stream::Null());
  
   cv::Mat_<uint8_t> descriptors_cpu;
@@ -126,6 +134,8 @@ class FreakGpuBenchmark : public benchmark::Fixture {
       cv::resize(base_img, img, {s.range(0), s.range(1)});   
       img_gpu_.upload(img);
 
+      cv::cuda::integral(img_gpu_, integral_gpu_);
+
       FastGpu fast(100000, freak_.borderWidth()+5);
 
       std::vector<short3> keypoints_cpu; 
@@ -145,6 +155,7 @@ class FreakGpuBenchmark : public benchmark::Fixture {
   protected:
     FreakGpu freak_;
     cv::cudev::GpuMat_<uint8_t> img_gpu_;
+    cv::cudev::GpuMat_<uint> integral_gpu_;
     CudaDeviceVector<short3> keypoints_gpu_;
     int keypoints_count_;
     cv::cudev::GpuMat_<uint8_t> descriptors_gpu_;
@@ -154,7 +165,10 @@ BENCHMARK_DEFINE_F(FreakGpuBenchmark, describe)(benchmark::State& state) {
   auto& stream = cv::cuda::Stream::Null();
   while (state.KeepRunning()) {
     freak_.describe(
-        img_gpu_, keypoints_gpu_, keypoints_count_, descriptors_gpu_, stream);
+        integral_gpu_, 
+        keypoints_gpu_, keypoints_count_, 
+        descriptors_gpu_, 
+        stream);
     stream.waitForCompletion();
   }
 
