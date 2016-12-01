@@ -1,7 +1,11 @@
 #include <assert.h>
 #include <opencv2/opencv.hpp>
 
+#include <Eigen/Geometry>
+
 #include "math3d.hpp"
+
+namespace e = Eigen;
 
 cv::Point3d operator * (const cv::Mat& m, const cv::Point3d& p) {
   assert(m.rows == 3 && m.cols == 3);
@@ -22,13 +26,13 @@ cv::Point2f projectPoint(const cv::Mat& m, const cv::Point3d& p) {
                      (P(1, 1) * p.y + P(1, 2) * p.z)/p.z);
 }
 
-std::pair<cv::Point2d, cv::Point2d> projectPoint(
+std::pair<Eigen::Vector2d, Eigen::Vector2d> projectPoint(
     const StereoIntrinsics& i, 
-    const cv::Point3d& p) {
+    const Eigen::Vector3d& p) {
 
-  double v = i.f * p.y / p.z + i.cy;
-  cv::Point2d left(i.f * p.x / p.z + i.cx, v);
-  cv::Point2d right((i.f * p.x + i.dr) / p.z + i.cx, v);
+  double v = i.f * p.y() / p.z() + i.cy;
+  Eigen::Vector2d left(i.f * p.x() / p.z() + i.cx, v);
+  Eigen::Vector2d right((i.f * p.x() + i.dr) / p.z() + i.cx, v);
 
   return std::make_pair(left, right);
 }
@@ -42,65 +46,22 @@ cv::Point2d projectPoint(const MonoIntrinsics& c, const cv::Point3d& p) {
   return res;
 }
 
-cv::Mat rotX(double angle) {
-  cv::Mat res = cv::Mat::eye(3, 3, CV_64FC1);
-  cv::Mat_<double>& r = static_cast<cv::Mat_<double>&>(res);
+e::Vector3d rotToYawPitchRoll(const e::Quaterniond& q) {
+  e::Matrix3d r = q.toRotationMatrix();  
 
-  double c = cos(angle);
-  double s = sin(angle);
+  e::Vector3d z = r.col(2);
+  e::Vector3d x = r.col(0);
 
-  r(1, 1) = c;
-  r(1, 2) = -s;
-  r(2, 1) = s;
-  r(2, 2) = c;
-
-  return res;
-}
-
-cv::Mat rotY(double angle) {
-  cv::Mat res = cv::Mat::eye(3, 3, CV_64FC1);
-  cv::Mat_<double>& r = static_cast<cv::Mat_<double>&>(res);
-
-  double c = cos(angle);
-  double s = sin(angle);
-
-  r(0, 0) = c;
-  r(0, 2) = s;
-  r(2, 0) = -s;
-  r(2, 2) = c;
-
-  return res;
-}
-
-cv::Mat rotZ(double angle) {
-  cv::Mat res = cv::Mat::eye(3, 3, CV_64FC1);
-  cv::Mat_<double>& r = static_cast<cv::Mat_<double>&>(res);
-
-  double c = cos(angle);
-  double s = sin(angle);
-
-  r(0, 0) = c;
-  r(0, 1) = -s;
-  r(1, 0) = s;
-  r(1, 1) = c;
-
-  return res;
-}
-
-cv::Vec3d rotToEuler(const cv::Mat& r) {
-  cv::Vec3d z = r.col(2);
-  cv::Vec3d x = r.col(0);
-
-  cv::Vec3d res;
+  e::Vector3d res;
 
   // Yaw
   res(0) = atan2(z(0), z(2));
   // Pitch
   res(1) = atan2(-z(1), sqrt(z(0)*z(0) + z(2)*z(2)));
   // Roll
-  cv::Vec3d x1(z(2), 0, -z(0));
+  e::Vector3d x1(z(2), 0, -z(0));
   auto cp = x1.cross(x);
-  double roll = asin(cv::norm(cp) / cv::norm(x1));
+  double roll = asin(cp.norm() / x1.norm());
   if (x(1) < 0) {
     roll = -roll;
   }

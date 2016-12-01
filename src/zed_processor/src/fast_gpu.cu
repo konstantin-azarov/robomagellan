@@ -236,6 +236,7 @@ void FastGpu::detect(
   auto s = cv::cuda::Stream::Null();
 
   computeScores(img, threshold, s);
+  downloadKpCount(s);
   s.waitForCompletion();
   extract(threshold, res, s);
 }

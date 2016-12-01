@@ -1,16 +1,20 @@
-#define CATCH_CONFIG_MAIN
-
 #include <cmath>
 #include <opencv2/opencv.hpp>
+#include <iostream>
 #include <random>
 
 #include <gtest/gtest.h>
+
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 #include "reprojection_estimator.hpp"
 
 #include "math3d.hpp"
 
 const double EPS = 1E-6;
+
+namespace e = Eigen;
 
 class ReprojectionEstimatorTest : public ::testing::Test {
   protected:
@@ -21,25 +25,25 @@ class ReprojectionEstimatorTest : public ::testing::Test {
       intrinsics.cy = 200;
     }
 
-    std::vector<std::pair<cv::Point3d, cv::Point3d>> regularPoints(
-        cv::Mat R, cv::Point3d t) {
-      std::vector<cv::Point3d> src, transformed;
-      src.push_back(cv::Point3d(0, 0, 2));
-      src.push_back(cv::Point3d(1, 0, 1));
-      src.push_back(cv::Point3d(0, 1, 1));
-      src.push_back(cv::Point3d(10, 10, 10));
+    std::vector<std::pair<e::Vector3d, e::Vector3d>> regularPoints(
+        e::Affine3d t) {
+      std::vector<e::Vector3d> src, transformed;
+      src.push_back(e::Vector3d(0, 0, 2));
+      src.push_back(e::Vector3d(1, 0, 1));
+      src.push_back(e::Vector3d(0, 1, 1));
+      src.push_back(e::Vector3d(10, 10, 10));
 
-      std::vector<std::pair<cv::Point3d, cv::Point3d>> res;
+      std::vector<std::pair<e::Vector3d, e::Vector3d>> res;
 
       for (auto p : src) {
-        res.push_back(std::make_pair(p, R*p + t));
+        res.push_back(std::make_pair(p, t*p));
       }
 
       return res;
     }
 
     std::vector<StereoReprojectionFeature> stereoFeatures(
-        const std::vector<std::pair<cv::Point3d, cv::Point3d>>& pts) {
+        const std::vector<std::pair<e::Vector3d, e::Vector3d>>& pts) {
       std::vector<StereoReprojectionFeature> features;
       for (auto p : pts) {
         auto p1 = projectPoint(intrinsics, p.first);
@@ -53,14 +57,14 @@ class ReprojectionEstimatorTest : public ::testing::Test {
       return features;
     }
 
-    cv::Point2d projectMono(const cv::Point3d& pt) {
-      return cv::Point2d(
-        pt.x/pt.z * intrinsics.f + intrinsics.cx,
-        pt.y/pt.z * intrinsics.f + intrinsics.cy);
+    e::Vector2d projectMono(const e::Vector3d& pt) {
+      return e::Vector2d(
+        pt.x()/pt.z() * intrinsics.f + intrinsics.cx,
+        pt.y()/pt.z() * intrinsics.f + intrinsics.cy);
     }
 
     std::vector<MonoReprojectionFeature> monoFeatures(
-        const std::vector<std::pair<cv::Point3d, cv::Point3d>>& pts) {
+        const std::vector<std::pair<e::Vector3d, e::Vector3d>>& pts) {
       std::vector<MonoReprojectionFeature> features;
       for (auto p : pts) {
         auto s1 = projectMono(p.first);
@@ -74,31 +78,34 @@ class ReprojectionEstimatorTest : public ::testing::Test {
       return features;
     }
 
-    void testRegularPointsStereo(cv::Mat r, cv::Point3d t) {
+    void testRegularPointsStereo(e::Affine3d t0) {
       StereoReprojectionEstimator estimator(&intrinsics);
       
-      auto pts = regularPoints(r, t);
+      auto pts = regularPoints(t0);
       auto features = stereoFeatures(pts);
-      
-      estimator.estimate(features);
+     
+      e::Quaterniond q;
+      e::Vector3d t;
 
-      ASSERT_TRUE(compareMats(estimator.rot(), r, EPS))
-        << "got=" << estimator.rot() << " expected=" << r;
+      estimator.estimate(features, q, t, nullptr);
 
-      ASSERT_TRUE(comparePoints(estimator.t(), t, EPS)) 
-        << "got=" << estimator.t() << " expected=" << t;
+      auto t1 = e::Translation3d(t)*q;
+      ASSERT_TRUE(t0.isApprox(t1, 1E-6))
+        << "got=" << t1.linear() << ", " << t1.translation() 
+        << " expected=" << t0.linear() << ", " << t0.translation();
     }
 
-    void testRegularPointsMono(const cv::Mat& r) {
+    void testRegularPointsMono(const e::Quaterniond& q0) {
       MonoReprojectionEstimator estimator(&intrinsics);
 
-      auto pts = regularPoints(r, cv::Point3d());
+      auto pts = regularPoints(e::Affine3d(q0));
       auto features = monoFeatures(pts);
 
-      estimator.estimate(features);
+      e::Quaterniond q;
+      estimator.estimate(features, q);
 
-      ASSERT_TRUE(compareMats(estimator.rot(), r, EPS))
-        << "got=" << estimator.rot() << " expected=" << r;
+      ASSERT_TRUE(q.isApprox(q0, 1E-6))
+        << "got=" << e::Matrix3d(q) << " expected=" << e::Matrix3d(q0);
     }
 
 
@@ -106,39 +113,57 @@ class ReprojectionEstimatorTest : public ::testing::Test {
 };
 
 TEST_F(ReprojectionEstimatorTest, rotXStereo) {
-  testRegularPointsStereo(rotX(10*M_PI/180), cv::Point3d());
+  testRegularPointsStereo(
+      e::Affine3d(e::AngleAxisd(10*M_PI/180, e::Vector3d::UnitX())));
+  testRegularPointsStereo(
+      e::Affine3d(e::AngleAxisd(-10*M_PI/180, e::Vector3d::UnitX())));
 }
 
 TEST_F(ReprojectionEstimatorTest, rotYStereo) {
-  testRegularPointsStereo(rotY(10*M_PI/180), cv::Point3d());
+  testRegularPointsStereo(
+      e::Affine3d(e::AngleAxisd(10*M_PI/180, e::Vector3d::UnitY())));
+  testRegularPointsStereo(
+      e::Affine3d(e::AngleAxisd(-10*M_PI/180, e::Vector3d::UnitY())));
 }
 
 TEST_F(ReprojectionEstimatorTest, rotZStereo) {
-  testRegularPointsStereo(rotZ(10*M_PI/180), cv::Point3d());
+  testRegularPointsStereo(
+      e::Affine3d(e::AngleAxisd(10*M_PI/180, e::Vector3d::UnitZ())));
+  testRegularPointsStereo(
+      e::Affine3d(e::AngleAxisd(-10*M_PI/180, e::Vector3d::UnitZ())));
 }
 
 TEST_F(ReprojectionEstimatorTest, rotXMono) {
-  testRegularPointsMono(rotX(10*M_PI/180));
+  testRegularPointsMono(
+      e::Quaterniond(e::AngleAxisd(10*M_PI/180, e::Vector3d::UnitX())));
+  testRegularPointsMono(
+      e::Quaterniond(e::AngleAxisd(-10*M_PI/180, e::Vector3d::UnitX())));
 }
 
 TEST_F(ReprojectionEstimatorTest, rotYMono) {
-  testRegularPointsMono(rotY(10*M_PI/180));
+  testRegularPointsMono(
+      e::Quaterniond(e::AngleAxisd(10*M_PI/180, e::Vector3d::UnitY())));
+  testRegularPointsMono(
+      e::Quaterniond(e::AngleAxisd(-10*M_PI/180, e::Vector3d::UnitY())));
 }
 
 TEST_F(ReprojectionEstimatorTest, rotZMono) {
-  testRegularPointsMono(rotZ(10*M_PI/180));
+  testRegularPointsMono(
+      e::Quaterniond(e::AngleAxisd(10*M_PI/180, e::Vector3d::UnitZ())));
+  testRegularPointsMono(
+      e::Quaterniond(e::AngleAxisd(-10*M_PI/180, e::Vector3d::UnitZ())));
 }
 
 TEST_F(ReprojectionEstimatorTest, tX) {
-  testRegularPointsStereo(cv::Mat::eye(3, 3, CV_64FC1), cv::Point3d(10, 0, 0));
+  testRegularPointsStereo(e::Affine3d(e::Translation3d(e::Vector3d(10, 0, 0))));
 }
 
 TEST_F(ReprojectionEstimatorTest, tY) {
-  testRegularPointsStereo(cv::Mat::eye(3, 3, CV_64FC1), cv::Point3d(0, 10, 0));
+  testRegularPointsStereo(e::Affine3d(e::Translation3d(e::Vector3d(0, 10, 0))));
 }
 
 TEST_F(ReprojectionEstimatorTest, tZ) {
-  testRegularPointsStereo(cv::Mat::eye(3, 3, CV_64FC1), cv::Point3d(0, 0, 10));
+  testRegularPointsStereo(e::Affine3d(e::Translation3d(e::Vector3d(0, 0, 10))));
 }
 
 TEST_F(ReprojectionEstimatorTest, random) {
@@ -151,8 +176,10 @@ TEST_F(ReprojectionEstimatorTest, random) {
     auto t = std::bind(translation_d, generator);
 
     testRegularPointsStereo(
-        rotX(angle())*rotY(angle())*rotZ(angle()),
-        cv::Point3d(t(), t(), t()));
+        e::Translation3d(e::Vector3d(t(), t(), t()))*
+        e::AngleAxisd(angle(), e::Vector3d::UnitX())*
+        e::AngleAxisd(angle(), e::Vector3d::UnitY())*
+        e::AngleAxisd(angle(), e::Vector3d::UnitZ()));
   }
 }
 
