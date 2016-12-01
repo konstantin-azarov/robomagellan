@@ -3,6 +3,7 @@
 
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
+#include "cuda_pinned_allocator.hpp"
 #include "cuda_device_vector.hpp"
 
 class Matcher {
@@ -20,7 +21,7 @@ class Matcher {
     // Should be called after operations in computeScores complete
      void gatherMatches(
         int n1, int n2,
-        const std::vector<ushort2>& pairs_cpu,
+        PinnedVector<ushort2>& pairs_cpu,
         float threshold_ratio,
         std::vector<cv::Vec2s>& matches);
 

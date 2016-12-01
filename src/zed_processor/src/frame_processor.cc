@@ -2,9 +2,12 @@
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/cuda.hpp>
+#include <opencv2/cudaarithm.hpp>
 #include <opencv2/cudawarping.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
+
+#include <nvToolsExtCuda.h>
 
 #include "calibration_data.hpp"
 #include "frame_processor.hpp"
@@ -16,7 +19,8 @@ using namespace std::chrono;
 FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
     calib_(&calib),
     freak_(64.980350),
-    fast_(kMaxKeypoints*5, freak_.borderWidth()),
+    fast_l_(kMaxKeypoints*5, freak_.borderWidth()),
+    fast_r_(kMaxKeypoints*5, freak_.borderWidth()),
     matcher_(kMaxKeypoints, kMaxKeypoints * 15),
     keypoints_gpu_l_(kMaxKeypoints),
     keypoints_gpu_r_(kMaxKeypoints),
@@ -34,6 +38,13 @@ FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) :
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
     undistort_map_y_[i].upload(calib_->undistort_maps[i].y);
   }
+
+  cudaSafeCall(cudaHostAlloc(
+        &keypoint_sizes_, 2*sizeof(int), cudaHostAllocDefault));
+}
+
+FrameProcessor::~FrameProcessor() {
+  cudaSafeCall(cudaFreeHost(keypoint_sizes_));
 }
 
 std::ostream& operator << (std::ostream& s, ushort4 v) {
@@ -41,75 +52,111 @@ std::ostream& operator << (std::ostream& s, ushort4 v) {
   return s;
 }
 
+cv::cuda::Stream s;
+
 void FrameProcessor::process(
     const cv::Mat src[], 
     int threshold,
     FrameData& frame_data) {
+
+  nvtxRangePushA("frame_processor");
+
   auto t0 = std::chrono::high_resolution_clock::now();
 
-  CudaDeviceVector<short3>*
-    keypoints_gpu[2] = { &keypoints_gpu_l_, &keypoints_gpu_r_ };
+  CudaDeviceVector<short3>* keypoints_gpu[2] = 
+      { &keypoints_gpu_l_, &keypoints_gpu_r_ };
+  FastGpu* fast[2] = { &fast_l_, &fast_r_ };
 
+  cv::cuda::Stream* s = streams_;
+  cv::cuda::Event*  e = events_;
+
+
+  
   for (int i=0; i < 2; ++i) {
-    auto t1 = std::chrono::high_resolution_clock::now();
+  /* auto t0 = std::chrono::high_resolution_clock::now(); */
+    src_img_[i].upload(src[i], s[i]);
 
-    src_img_[i].upload(src[i]);
-
+  /* auto t1 = std::chrono::high_resolution_clock::now(); */
     cv::cuda::remap(
         src_img_[i], 
         undistorted_image_gpu_[i], 
         undistort_map_x_[i],
         undistort_map_y_[i], 
-        cv::INTER_LINEAR);
+        cv::INTER_LINEAR,
+        cv::BORDER_CONSTANT,
+        cv::Scalar(),
+        s[i]);
+      
+  /* auto t2 = std::chrono::high_resolution_clock::now(); */
+    fast[i]->computeScores(undistorted_image_gpu_[i], threshold, s[i]);
+  /* auto t3 = std::chrono::high_resolution_clock::now(); */
 
-    auto t2 = std::chrono::high_resolution_clock::now();
-   
-    fast_.detect(undistorted_image_gpu_[i], threshold, *keypoints_gpu[i]);
-    keypoints_gpu[i]->download(keypoints_cpu_[i]);
+  /* std::cout << "Upload: " */
+  /*   << " t1 = " << duration_cast<milliseconds>(t1 - t0).count() */
+  /*   << " t2 = " << duration_cast<milliseconds>(t2 - t0).count() */
+  /*   << " t3 = " << duration_cast<milliseconds>(t3 - t0).count() */
+  /*   << std::endl; */
+  }
 
+  for (int i=0; i < 2; ++i) {
+    fast[i]->downloadKpCount(s[i]);
+  }
+
+  auto t1 = std::chrono::high_resolution_clock::now();
+
+  for (int i=0; i < 2; ++i) {
+    s[i].waitForCompletion();
+    fast[i]->extract(threshold, *keypoints_gpu[i], s[i]);
+    keypoints_gpu[i]->download(keypoints_cpu_[i], keypoint_sizes_[i], s[i]);
+    e[i].record(s[i]);
+  }
+ 
+
+  auto t2 = std::chrono::high_resolution_clock::now();
+  for (int i=0; i < 2; ++i) {
+    cv::cuda::integral(undistorted_image_gpu_[i], integral_image_gpu_[i], s[i]);
+  }
+  auto t3 = std::chrono::high_resolution_clock::now();
+
+  for (int i=0; i < 2; ++i) {
+    e[i].waitForCompletion();
+    
+    keypoints_cpu_[i].resize(keypoint_sizes_[i]);
     sort(
         keypoints_cpu_[i].begin(), keypoints_cpu_[i].end(), 
         [this, i](const short3& a, const short3& b) -> bool {
           return a.y < b.y || (a.y == b.y && a.x < b.x);
         });
 
-    keypoints_gpu[i]->upload(keypoints_cpu_[i]);
-
-    auto t3 = std::chrono::high_resolution_clock::now();
+    keypoints_gpu[i]->upload(keypoints_cpu_[i], s[i]);
 
     freak_.describe(
-        undistorted_image_gpu_[i], 
+        integral_image_gpu_[i], 
         *keypoints_gpu[i],
         keypoints_cpu_[i].size(),
         descriptors_gpu_[i],
-        cv::cuda::Stream::Null());
+        s[i]);
 
-    cv::cuda::Stream::Null().waitForCompletion();
-
-    auto t4 = std::chrono::high_resolution_clock::now();
-
-    std::cout 
-      << " kp = " << keypoints_cpu_[i].size()
-      << " remap = " << duration_cast<milliseconds>(t2 - t1).count()
-      << " detect = " << duration_cast<milliseconds>(t3 - t2).count() 
-      << " extract = " << duration_cast<milliseconds>(t4 - t3).count();
+    e[i].record(s[i]);
   }
 
-  auto t5 = std::chrono::high_resolution_clock::now();
-
   computeKpPairs_(keypoints_cpu_[0], keypoints_cpu_[1], keypoint_pairs_);
+  keypoint_pairs_gpu_.upload(keypoint_pairs_, s[2]);
 
-  int n_left = keypoints_cpu_[0].size();
-  int n_right = keypoints_cpu_[1].size();
-
-  keypoint_pairs_gpu_.upload(keypoint_pairs_);
+  s[2].waitEvent(e[0]);
+  s[2].waitEvent(e[1]);
 
   matcher_.computeScores(
       descriptors_gpu_[0],
       descriptors_gpu_[1],
       keypoint_pairs_gpu_,
       keypoint_pairs_.size(),
-      cv::cuda::Stream::Null());
+      s[2]);
+
+  int n_left = keypoints_cpu_[0].size();
+  int n_right = keypoints_cpu_[1].size();
+
+  s[2].waitForCompletion();
 
   matcher_.gatherMatches(
       n_left, n_right,
@@ -120,9 +167,9 @@ void FrameProcessor::process(
   auto t6 = std::chrono::high_resolution_clock::now();
 
   descriptors_gpu_[0].rowRange(0, n_left).download(
-      frame_data.descriptors_left.rowRange(0, n_left));
+      frame_data.descriptors_left.rowRange(0, n_left), s[0]);
   descriptors_gpu_[1].rowRange(0, n_right).download(
-      frame_data.descriptors_right.rowRange(0, n_right));
+      frame_data.descriptors_right.rowRange(0, n_right), s[1]);
 
   frame_data.points.resize(0);
   const auto& c = calib_->intrinsics;
@@ -147,21 +194,28 @@ void FrameProcessor::process(
 
   }
 
+  s[0].waitForCompletion();
+  s[1].waitForCompletion();
+
+  cudaDeviceSynchronize();
+
   auto t7 = std::chrono::high_resolution_clock::now();
   
   std::cout
     << " n_pairs = " << keypoint_pairs_.size()
     << " n_points = " << frame_data.points.size()
-    << " match = " << duration_cast<milliseconds>(t6 - t5).count() 
-    << " transform = " << duration_cast<milliseconds>(t7 - t6).count() 
+    << " upload = " << duration_cast<milliseconds>(t1 - t0).count()
+    << " integral = " << duration_cast<milliseconds>(t3 - t2).count()
     << " total = " << duration_cast<milliseconds>(t7 - t0).count()
     << std::endl;
+
+  nvtxRangePop();
 }
 
 void FrameProcessor::computeKpPairs_(
-    const std::vector<short3>& kps1,
-    const std::vector<short3>& kps2,
-    std::vector<ushort2>& keypoint_pairs) {
+    const PinnedVector<short3>& kps1,
+    const PinnedVector<short3>& kps2,
+    PinnedVector<ushort2>& keypoint_pairs) {
   keypoint_pairs.resize(0);
   int j0 = 0, j1 = 0;
   for (int i = 0; i < kps1.size(); ++i) {
@@ -185,48 +239,4 @@ void FrameProcessor::computeKpPairs_(
     }
   }
 }
-
-void FrameProcessor::computeMatches_(
-        const cv::Mat_<uchar>& d1,
-        const cv::Mat_<uchar>& d2,
-        const std::vector<short2>& keypoint_pairs,
-        std::vector<ushort4> matches[2]) {
-
-  matches[0].resize(d1.rows);
-  std::fill(matches[0].begin(), matches[0].end(), make_ushort4(0xffff, 0xffff, 0xffff, 0));
-  matches[1].resize(d2.rows);
-  std::fill(matches[1].begin(), matches[1].end(), make_ushort4(0xffff, 0xffff, 0xffff, 0));
-
-  for (int i=0; i < keypoint_pairs.size(); ++i) {
-    const auto& p = keypoint_pairs[i];
-    int score = descriptorDist(d1.row(p.x), d2.row(p.y));
-    {
-      ushort4 m = matches[0][p.x];
-      if (score < m.x) {
-        matches[0][p.x] = make_ushort4(score, m.x, p.y, 0);
-      } else if (score < m.y) {
-        matches[0][p.x] = make_ushort4(m.x, score, m.z, 0);
-      }
-    }
-    {
-      ushort4 m = matches[1][p.y];
-      if (score < m.x) {
-        matches[1][p.y] = make_ushort4(score, m.x, p.x, 0);
-      } else if (score < m.y) {
-        matches[1][p.y] = make_ushort4(m.x, score, m.z, 0);
-      }
-    }
-  }
-
-  for (int t = 0; t < 2; ++t) {
-    for (auto& m : matches[t]) {
-      if (m.x != 0xFFFF) {
-        if (m.x / static_cast<double>(m.y) >= 0.8) {
-          m.z = 0xFFFF;
-        }
-      }
-    }
-  }
-}
-
 

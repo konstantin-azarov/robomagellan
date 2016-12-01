@@ -182,14 +182,11 @@ FreakGpu::~FreakGpu() {
 }
 
 void FreakGpu::describe(
-    const cv::cuda::GpuMat& img,
+    const cv::cudev::GpuMat_<uint>& integral_img,
     const CudaDeviceVector<short3>& keypoints,
     int keypoints_count,
     cv::cudev::GpuMat_<uint8_t>& descriptors,
     cv::cuda::Stream& stream) {
-
-  cv::cuda::integral(img, integral_, stream);
-
   dim3 thread_block_dim(kNumThreads, kKeyPointsPerBlock);
   dim3 grid_dim(
       (keypoints_count + kKeyPointsPerBlock - 1)/ kKeyPointsPerBlock);
@@ -198,7 +195,7 @@ void FreakGpu::describe(
 
   describeKeypoints<<<grid_dim, thread_block_dim, 0, cuda_stream>>>(
     consts_,
-    integral_, 
+    integral_img, 
     keypoints,
     descriptors);
 

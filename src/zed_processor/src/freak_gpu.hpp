@@ -25,7 +25,7 @@ class FreakGpu : public FreakBase {
     static bool initialize();
 
     void describe(
-        const cv::cuda::GpuMat& img,
+        const cv::cudev::GpuMat_<uint>& integral_img,
         const CudaDeviceVector<short3>& keypoints,
         int keypoints_count,
         cv::cudev::GpuMat_<uint8_t>& descriptors,
@@ -46,8 +46,6 @@ class FreakGpu : public FreakBase {
 #endif
 
   private:
-    cv::cudev::GpuMat_<uint> integral_;
- 
     FreakConsts consts_;
 };
 

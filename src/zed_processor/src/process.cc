@@ -72,7 +72,9 @@ int main(int argc, char** argv) {
   int frame_height = calib.raw.size.height;
 
   BagVideoReader rdr(video_file, "/image_raw");
-  cv::Mat frame_mat(frame_height, frame_width*2, CV_8UC1);
+  cv::Mat frame_mat;
+  frame_mat.allocator = cv::cuda::HostMem::getAllocator(cv::cuda::HostMem::PAGE_LOCKED);
+  frame_mat.create(frame_height, frame_width*2, CV_8UC1);
   cv::Mat mono_frames[] = {
     frame_mat(cv::Range::all(), cv::Range(0, frame_width)),
     frame_mat(cv::Range::all(), cv::Range(frame_width, frame_width*2))

@@ -175,23 +175,35 @@ namespace {
 FastGpu::FastGpu(int max_keypoints, int border) : 
   border_(border),
   tmp_keypoints_(max_keypoints) {
-
+  cudaHostAlloc(&n_tmp_keypoints_, sizeof(int), cudaHostAllocDefault);
 }
 
 FastGpu::~FastGpu() {
+  cudaFreeHost(n_tmp_keypoints_);
 }
+
+#include <chrono>
+#include <iostream>
+
+using namespace std::chrono;
 
 void FastGpu::computeScores(
     const cv::cudev::GpuMat_<uchar>& img, 
     int threshold,
     cv::cuda::Stream& s) {
+  /* auto t0 = std::chrono::high_resolution_clock::now(); */
+
   scores_.create(img.rows, img.cols);
   scores_.setTo(0, s);
+  
+  /* auto t1 = std::chrono::high_resolution_clock::now(); */
 
   dim3 grid_dim((img.cols + BX - 1) / BX, (img.rows + BY - 1) / BY);
   dim3 thread_block_dim(BX, BY);
 
   tmp_keypoints_.clear(s);
+
+  /* auto t2 = std::chrono::high_resolution_clock::now(); */
 
   auto cuda_stream = cv::cuda::StreamAccessor::getStream(s);
   compute_scores<<<grid_dim, thread_block_dim, 0, cuda_stream>>>(
@@ -201,8 +213,10 @@ void FastGpu::computeScores(
       border_,
       scores_, 
       tmp_keypoints_);
+}
 
-  tmp_keypoints_.sizeAsync(n_tmp_keypoints_, s);
+void FastGpu::downloadKpCount(cv::cuda::Stream& s) {
+  tmp_keypoints_.sizeAsync(*n_tmp_keypoints_, s);
 }
 
 void FastGpu::extract(
@@ -211,7 +225,7 @@ void FastGpu::extract(
     cv::cuda::Stream& s) {
   res.clear(s);
   auto cuda_stream = cv::cuda::StreamAccessor::getStream(s);
-  nonmax_supression<<<(n_tmp_keypoints_ + 63)/64, 64, 0, cuda_stream>>>(
+  nonmax_supression<<<(*n_tmp_keypoints_ + 63)/64, 64, 0, cuda_stream>>>(
       scores_, tmp_keypoints_, res);
 }
 

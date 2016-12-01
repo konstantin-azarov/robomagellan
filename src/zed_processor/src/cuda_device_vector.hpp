@@ -89,14 +89,30 @@ class CudaDeviceVector {
             cv::cuda::StreamAccessor::getStream(s)));
     }
 
-    __host__ void download(std::vector<T>& dst) const {
+    template <class A>
+    __host__ void download(std::vector<T, A>& dst) const {
       dst.resize(size());
       cudaSafeCall(cudaMemcpy(
             dst.data(), dev_.ptr_, sizeof(T)*dst.size(),
             cudaMemcpyDeviceToHost));
     }
 
-    __host__ void upload(const std::vector<T>& src) {
+    template <class A>
+    __host__ void download(
+        std::vector<T, A>& dst, int& size, cv::cuda::Stream& s) const {
+      dst.resize(dev_.max_size_);
+      cudaSafeCall(cudaMemcpyAsync(
+            dst.data(), dev_.ptr_, sizeof(T)*dst.size(),
+            cudaMemcpyDeviceToHost,
+            cv::cuda::StreamAccessor::getStream(s)));
+      cudaSafeCall(cudaMemcpyAsync(
+            &size, dev_.size_ptr_, sizeof(int), 
+            cudaMemcpyDeviceToHost,
+            cv::cuda::StreamAccessor::getStream(s)));
+    }
+
+    template <class A>
+    __host__ void upload(std::vector<T, A>& src) {
       upload_size_ = src.size();
       cudaSafeCall(cudaMemcpy(
             dev_.ptr_, src.data(), sizeof(T)*src.size(),
@@ -106,6 +122,18 @@ class CudaDeviceVector {
             cudaMemcpyHostToDevice));
     }
 
+    template <class A>
+    __host__ void upload(std::vector<T, A>& src, cv::cuda::Stream& s) {
+      upload_size_ = src.size();
+      cudaSafeCall(cudaMemcpyAsync(
+            dev_.ptr_, src.data(), sizeof(T)*src.size(),
+            cudaMemcpyHostToDevice,
+            cv::cuda::StreamAccessor::getStream(s)));
+      cudaSafeCall(cudaMemcpyAsync(
+            dev_.size_ptr_, &upload_size_, sizeof(int),
+            cudaMemcpyHostToDevice,
+            cv::cuda::StreamAccessor::getStream(s)));
+    }
 
   private:
     Dev dev_;

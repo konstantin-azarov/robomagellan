@@ -19,7 +19,7 @@ elseif(CMAKE_SYSTEM_NAME2 MATCHES "armv7l" ) # K1
     SET(CUDA_VERSION "6.5")
 else() # Desktop
     SET(OCV_VERSION "3.1")
-    SET(CUDA_VERSION "7.5")
+    SET(CUDA_VERSION "8.0")
 endif()
 
 include_directories("/usr/include/libusb-1.0")
@@ -246,7 +246,7 @@ target_link_libraries(
   stereo_matcher
   libdw.so
   ${catkin_LIBRARIES}
-  ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY}
+  ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY} nvToolsExt
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
 )

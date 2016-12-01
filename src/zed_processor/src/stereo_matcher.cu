@@ -48,9 +48,11 @@ namespace {
 
 __host__ Matcher::Matcher(int max_descriptors, int max_pairs) :
     scores_gpu_(1, max_pairs),
-    scores_cpu_(1, max_pairs),
     m1_(max_descriptors),
     m2_(max_descriptors) {
+  scores_cpu_.allocator = cv::cuda::HostMem::getAllocator(
+      cv::cuda::HostMem::PAGE_LOCKED); 
+  scores_cpu_.create(1, max_pairs);
 }
 
 __host__ void Matcher::computeScores(
@@ -77,7 +79,7 @@ __host__ void Matcher::computeScores(
 
 __host__ void Matcher::gatherMatches(
     int n1, int n2,
-    const std::vector<ushort2>& pairs_cpu,
+    PinnedVector<ushort2>& pairs_cpu,
     float threshold_ratio,
     std::vector<cv::Vec2s>& matches) {
  

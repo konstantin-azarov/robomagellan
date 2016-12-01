@@ -17,6 +17,8 @@ class FastGpu {
         int threshold,
         cv::cuda::Stream& s);
 
+    void downloadKpCount(cv::cuda::Stream& s);
+
     void extract(
         int threshold, 
         CudaDeviceVector<short3>& res, 
@@ -30,7 +32,7 @@ class FastGpu {
         CudaDeviceVector<short3>& res);
   private:
     int border_;
-    int n_tmp_keypoints_;
+    int* n_tmp_keypoints_;
 
     cv::cudev::GpuMat_<uint8_t> scores_;
     CudaDeviceVector<short2> tmp_keypoints_;
