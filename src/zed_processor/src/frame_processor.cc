@@ -70,8 +70,6 @@ void FrameProcessor::process(
   cv::cuda::Stream* s = streams_;
   cv::cuda::Event*  e = events_;
 
-
-  
   for (int i=0; i < 2; ++i) {
   /* auto t0 = std::chrono::high_resolution_clock::now(); */
     src_img_[i].upload(src[i], s[i]);
@@ -122,9 +120,10 @@ void FrameProcessor::process(
     e[i].waitForCompletion();
     
     keypoints_cpu_[i].resize(keypoint_sizes_[i]);
+
     sort(
         keypoints_cpu_[i].begin(), keypoints_cpu_[i].end(), 
-        [this, i](const short3& a, const short3& b) -> bool {
+        [](const short3& a, const short3& b) -> bool {
           return a.y < b.y || (a.y == b.y && a.x < b.x);
         });
 

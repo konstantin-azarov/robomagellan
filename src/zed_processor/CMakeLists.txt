@@ -7,7 +7,7 @@ IF(NOT CMAKE_BUILD_TYPE)
     SET(CMAKE_BUILD_TYPE Release)
 ENDIF(NOT CMAKE_BUILD_TYPE)
 
-find_package(ZED 1.0 REQUIRED)
+#find_package(ZED 1.0 REQUIRED)
 
 ##For Jetson, OpenCV4Tegra is based on OpenCV2.4
 exec_program(uname ARGS -p OUTPUT_VARIABLE CMAKE_SYSTEM_NAME2)
@@ -21,6 +21,9 @@ else() # Desktop
     SET(OCV_VERSION "3.1")
     SET(CUDA_VERSION "8.0")
 endif()
+
+SET(CMAKE_C_COMPILER "/usr/bin/clang")
+SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
 
 include_directories("/usr/include/libusb-1.0")
 
@@ -55,6 +58,7 @@ find_package(CUDA ${CUDA_VERSION} REQUIRED)
 
 set(CUDA_NVCC_FLAGS 
   -gencode arch=compute_20,code=sm_20 
+  -gencode arch=compute_30,code=sm_30
   -lineinfo 
   -std=c++11
   -O2
@@ -81,12 +85,12 @@ catkin_package(
 include_directories(
 	${catkin_INCLUDE_DIRS}
 	${CUDA_INCLUDE_DIRS}
-	${ZED_INCLUDE_DIRS}
+  #	${ZED_INCLUDE_DIRS}
 	${OpenCV_INCLUDE_DIRS}
   ${EIGEN_INCLUDE_DIRS}
 )
 
-link_directories(${ZED_LIBRARY_DIR})
+#link_directories(${ZED_LIBRARY_DIR})
 link_directories(${CUDA_LIBRARY_DIRS})
 link_directories(${OpenCV_LIBRARY_DIRS})
 
