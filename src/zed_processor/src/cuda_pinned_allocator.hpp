@@ -15,15 +15,16 @@ public:
   
   pointer allocate(size_type n, const void * = 0)
   {
-    pointer p;
-    cudaSafeCall(cudaHostAlloc(&p, n * sizeof(T), cudaHostAllocDefault));
+    pointer p = new T[n];
+  //  cudaSafeCall(cudaHostAlloc(&p, n * sizeof(T), cudaHostAllocDefault));
 
     return p;
   }
 
   void deallocate(pointer p, size_type)
   {
-    cudaSafeCall(cudaFreeHost(p));
+    delete[] p;
+//    cudaSafeCall(cudaFreeHost(p));
   }
 
   template<typename O>

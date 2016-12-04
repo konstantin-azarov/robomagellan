@@ -98,12 +98,13 @@ void FrameProcessor::process(
 
   for (int i=0; i < 2; ++i) {
     fast[i]->downloadKpCount(s[i]);
+    e[i].record(s[i]);
   }
 
   auto t1 = std::chrono::high_resolution_clock::now();
 
   for (int i=0; i < 2; ++i) {
-    s[i].waitForCompletion();
+    e[i].waitForCompletion();
     fast[i]->extract(threshold, *keypoints_gpu[i], s[i]);
     keypoints_gpu[i]->download(keypoints_cpu_[i], keypoint_sizes_[i], s[i]);
     e[i].record(s[i]);
@@ -119,6 +120,7 @@ void FrameProcessor::process(
   for (int i=0; i < 2; ++i) {
     e[i].waitForCompletion();
     
+    nvtxRangePushA("sort");
     keypoints_cpu_[i].resize(keypoint_sizes_[i]);
 
     sort(
@@ -128,6 +130,7 @@ void FrameProcessor::process(
         });
 
     keypoints_gpu[i]->upload(keypoints_cpu_[i], s[i]);
+    nvtxRangePop();
 
     freak_.describe(
         integral_image_gpu_[i], 
@@ -139,7 +142,9 @@ void FrameProcessor::process(
     e[i].record(s[i]);
   }
 
+  nvtxRangePushA("compute_pairs");
   computeKpPairs_(keypoints_cpu_[0], keypoints_cpu_[1], keypoint_pairs_);
+  nvtxRangePop();
   keypoint_pairs_gpu_.upload(keypoint_pairs_, s[2]);
 
   s[2].waitEvent(e[0]);

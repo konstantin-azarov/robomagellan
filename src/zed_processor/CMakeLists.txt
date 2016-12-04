@@ -58,7 +58,7 @@ find_package(CUDA ${CUDA_VERSION} REQUIRED)
 
 set(CUDA_NVCC_FLAGS 
   -gencode arch=compute_20,code=sm_20 
-  -gencode arch=compute_30,code=sm_30
+  -gencode arch=compute_30,code=sm_32
   -lineinfo 
   -std=c++11
   -O2
@@ -98,7 +98,7 @@ link_directories(${OpenCV_LIBRARY_DIRS})
 
 ###############################################################################
 # EXECUTABLE
-add_definitions(-std=c++11 -g)# -m64) #-Wall)
+add_definitions(-std=c++11 -g -Wno-deprecated-register)# -m64) #-Wall)
 
 #file(GLOB LIBVISO_SRC_FILES src/libviso/*.cpp)
 

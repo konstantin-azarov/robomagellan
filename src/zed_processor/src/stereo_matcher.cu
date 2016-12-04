@@ -50,8 +50,8 @@ __host__ Matcher::Matcher(int max_descriptors, int max_pairs) :
     scores_gpu_(1, max_pairs),
     m1_(max_descriptors),
     m2_(max_descriptors) {
-  scores_cpu_.allocator = cv::cuda::HostMem::getAllocator(
-      cv::cuda::HostMem::PAGE_LOCKED); 
+  /* scores_cpu_.allocator = cv::cuda::HostMem::getAllocator( */
+  /*     cv::cuda::HostMem::PAGE_LOCKED); */ 
   scores_cpu_.create(1, max_pairs);
 }
 

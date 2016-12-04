@@ -51,46 +51,6 @@ class FrameProcessor {
         int threshold,
         FrameData& frame_data);
 
-    /* const cv::Mat& undistortedImage(int i) const { */ 
-    /*   return undistorted_image_[i]; */
-    /* } */
-
-    /* const std::vector<cv::Point3d>& points() const { */
-    /*   return points_; */
-    /* } */
-
-    /* // For 0 <= p < points_.size() return left and right features for the */ 
-    /* // corresponding point. */
-    /* const std::pair<cv::Point2f, cv::Point2f> features(int p) const { */
-    /*   int i = point_keypoints_[p]; */
-    /*   int j = matches_[0][i].z; */
-
-    /*   cv::Point2f a(keypoints_cpu_[0][i].x, keypoints_cpu_[0][i].y); */
-    /*   cv::Point2f b(keypoints_cpu_[1][j].x, keypoints_cpu_[1][j].y); */
-    /*   return std::make_pair(a, b); */
-    /* } */
-
-
-    /* // For 0 <= p < points_.size() return left and right descriptor for the */
-    /* // corresponding point. */
-    /* const std::pair<cv::Mat, cv::Mat> pointDescriptors(int p) const { */
-    /*   int i = point_keypoints_[p]; */
-    /*   int j = matches_[0][i].z; */
-
-    /*   return std::make_pair(descriptors_[0].row(i), descriptors_[1].row(j)); */
-    /* } */
-
-    /* const std::vector<int>& pointKeypoints() const { return point_keypoints_; } */
-    /* const std::vector<short3>& keypoints(int t) const  { return keypoints_cpu_[t]; } */
-    /* cv::Mat descriptors(int t) const { return descriptors_[t]; } */
-    /* std::vector<int> matches(int t) const { */ 
-    /*   std::vector<int> res; */
-    /*   for (const auto& m : matches_[t]) { */
-    /*     res.push_back(m.z == 0xFFFF ? -1 : m.z); */
-    /*   } */
-    /*   return res; */
-    /* } */
-    
   private:
     static void computeKpPairs_(
         const PinnedVector<short3>& kps1,
