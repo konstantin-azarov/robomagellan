@@ -4,6 +4,8 @@
 #include "frame_processor.hpp"
 #include "math3d.hpp"
 
+#include "descriptor_tools.hpp"
+
 using namespace std::chrono;
 
 CrossFrameProcessor::CrossFrameProcessor(
@@ -12,6 +14,10 @@ CrossFrameProcessor::CrossFrameProcessor(
   : calibration_(calibration), 
     reprojection_estimator_(&calibration.intrinsics),
     config_(config) {
+  scores_left_.create(1100, 1100);
+  scores_left_gpu_.create(1100, 1100);
+  scores_right_.create(1100, 1100);
+  scores_right_gpu_.create(1100, 1100);
 }
 
 bool CrossFrameProcessor::process(
@@ -25,10 +31,28 @@ bool CrossFrameProcessor::process(
   const auto& points1 = p1.points;
   const auto& points2 = p2.points;
 
+  int n1 = points1.size();
+  int n2 = points2.size();
+
   auto t1 = std::chrono::high_resolution_clock::now();
 
-  match(p1, p2, matches_[0]);
-  match(p2, p1, matches_[1]);
+  descriptor_tools::scores(
+      p1.d_left.rowRange(0, n1), 
+      p2.d_left.rowRange(0, n2),
+      scores_left_gpu_,
+      cv::cuda::Stream::Null());
+
+  descriptor_tools::scores(
+      p1.d_right.rowRange(0, n1), 
+      p2.d_right.rowRange(0, n2),
+      scores_right_gpu_,
+      cv::cuda::Stream::Null());
+
+  scores_left_gpu_.download(scores_left_);
+  scores_right_gpu_.download(scores_right_);
+
+  match(p1, p2, scores_left_, scores_right_, n1, n2, matches_[0]);
+  match(p2, p1, scores_left_.t(), scores_right_.t(), n2, n1, matches_[1]);
 
   full_matches_.resize(0);
 
@@ -108,31 +132,24 @@ bool CrossFrameProcessor::process(
 void CrossFrameProcessor::match(
     const FrameData& p1, 
     const FrameData& p2,
+    const cv::Mat_<ushort>& scores_left,
+    const cv::Mat_<ushort>& scores_right,
+    int n1, int n2,
     std::vector<int>& matches) {
 
-  const auto& points1 = p1.points;
-  const auto& points2 = p2.points;
+  matches.resize(n1);
 
-  matches.resize(points1.size());
-
-  for (int i = 0; i < points1.size(); ++i) {
+  for (int i = 0; i < n1; ++i) {
     int best_j = -1;
     double best_dist = 1E+15;
 
-    for (int j = 0; j < points2.size(); ++j) {
+    for (int j = 0; j < n2; ++j) {
       double screen_d = cv::norm(p1.points[i].left - p2.points[j].left);
       if (screen_d > config_.match_radius) {
         continue;
       }
 
-      double d1 = descriptorDist(
-          p1.descriptors_left.row(p1.points[i].left_i), 
-          p2.descriptors_left.row(p2.points[j].left_i));
-      double d2 = descriptorDist(
-          p1.descriptors_right.row(p1.points[i].right_i), 
-          p2.descriptors_right.row(p2.points[j].right_i));
-
-      double d = std::max(d1, d2);
+      double d = std::max(scores_left[i][j], scores_right[i][j]);
 
       if (d < best_dist) {
         best_dist = d;

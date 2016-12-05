@@ -174,16 +174,6 @@ void FrameProcessor::process(
 
   auto t6 = std::chrono::high_resolution_clock::now();
 
-  matches_gpu_.upload(matches_, s[2]);
-
-  descriptor_tools::gatherDescriptors(
-      descriptors_gpu_[0],
-      descriptors_gpu_[1],
-      matches_gpu_,
-      matches_.size(),
-      frame_data.d_left,
-      frame_data.d_right,
-      s[2]);
 
   descriptors_gpu_[0].rowRange(0, n_left).download(
       frame_data.descriptors_left.rowRange(0, n_left), s[0]);
@@ -192,6 +182,7 @@ void FrameProcessor::process(
 
   frame_data.points.resize(0);
   const auto& c = calib_->intrinsics;
+  int k = 0;
   for (int t = 0; t < matches_.size(); ++t) {
     int i = matches_[t].x;
     int j = matches_[t].y; 
@@ -199,6 +190,7 @@ void FrameProcessor::process(
     auto& kp_r = keypoints_cpu_[1][j];
 
     if (kp_l.x > kp_r.x) {
+      matches_[k++] = matches_[t];
       StereoPoint p;
       p.world.z = c.dr / (kp_r.x - kp_l.x);
       p.world.x = (kp_l.x - c.cx) * p.world.z / c.f;
@@ -210,11 +202,24 @@ void FrameProcessor::process(
       p.score = kp_l.z + kp_r.z;
       frame_data.points.push_back(p);
     }
-
   }
+
+  matches_.resize(k);
+
+  matches_gpu_.upload(matches_, s[2]);
+
+  descriptor_tools::gatherDescriptors(
+      descriptors_gpu_[0],
+      descriptors_gpu_[1],
+      matches_gpu_,
+      matches_.size(),
+      frame_data.d_left,
+      frame_data.d_right,
+      s[2]);
 
   s[0].waitForCompletion();
   s[1].waitForCompletion();
+  s[2].waitForCompletion();
 
   cudaDeviceSynchronize();
 

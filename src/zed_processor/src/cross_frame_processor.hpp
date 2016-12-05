@@ -5,6 +5,9 @@
 
 #include <vector>
 
+#include <opencv2/core.hpp>
+#include <opencv2/cudev/ptr2d/gpumat.hpp>
+
 #include "clique.hpp"
 #include "reprojection_estimator.hpp"
 #include "rigid_estimator.hpp"
@@ -90,6 +93,9 @@ class CrossFrameProcessor {
     void match(
         const FrameData& p1, 
         const FrameData& p2,
+        const cv::Mat_<ushort>& scores_left,
+        const cv::Mat_<ushort>& scores_right,
+        int n1, int n2,
         std::vector<int>& matches);
 
     void buildClique_(
@@ -124,6 +130,9 @@ class CrossFrameProcessor {
     CrossFrameProcessorConfig config_;
 
     const StereoCalibrationData& calibration_;
+
+    cv::cudev::GpuMat_<ushort> scores_left_gpu_, scores_right_gpu_;
+    cv::Mat_<ushort> scores_left_, scores_right_;
 
     // matches[0][i] - best match in the second frame for i-th feature in the first frame
     // matches[1][j] - best match in the first frame for j-th feature in the second frame

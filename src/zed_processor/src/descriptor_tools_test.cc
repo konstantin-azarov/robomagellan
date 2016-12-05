@@ -13,20 +13,21 @@
 backward::SignalHandling sh;
 
 TEST(DescriptorTools, compact) {
-  cv::Mat_<uint8_t> descs(5, 64);
+  const int n = 10;
+  cv::Mat_<uint8_t> descs(10, 64);
 
-  for (int i = 0; i < 5; ++i) {
-    for (int j=0; j < 5; ++j) {
+  for (int i = 0; i < n; ++i) {
+    for (int j=0; j < 64; ++j) {
       descs(i, j) = i*64 + j;
     }
   }
 
-  std::vector<ushort2> idx = { { 0, 1}, {2, 3} };
+  std::vector<ushort2> idx = { { 0, 1}, {4, 3}, {2, 1}, {4, 2}, {5, 1}, {1, 5} };
 
 
   cv::cudev::GpuMat_<uint8_t> descs_gpu(descs);
-  cv::cudev::GpuMat_<uint8_t> c1_gpu(2, 64), c2_gpu(2, 64);
-  CudaDeviceVector<ushort2> idx_gpu(2);
+  cv::cudev::GpuMat_<uint8_t> c1_gpu(idx.size(), 64), c2_gpu(idx.size(), 64);
+  CudaDeviceVector<ushort2> idx_gpu(idx.size());
   idx_gpu.upload(idx);
   descriptor_tools::gatherDescriptors(
       cv::cudev::GpuMat_<uint8_t>(descs), 
