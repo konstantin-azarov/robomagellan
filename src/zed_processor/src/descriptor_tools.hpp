@@ -6,14 +6,20 @@
 #include "cuda_device_vector.hpp"
 
 namespace descriptor_tools {
-   void gatherDescriptors(
-      const cv::cudev::GpuMat_<uint8_t>& d1,
-      const cv::cudev::GpuMat_<uint8_t>& d2,
-      const CudaDeviceVector<ushort2>& matches,
-      int n_matches,
-      cv::cudev::GpuMat_<uint8_t>& d1_compact,
-      cv::cudev::GpuMat_<uint8_t>& d2_compact,
-      cv::cuda::Stream& stream);
+  void gatherDescriptors(
+    const cv::cudev::GpuMat_<uint8_t>& d1,
+    const cv::cudev::GpuMat_<uint8_t>& d2,
+    const CudaDeviceVector<ushort2>& matches,
+    int n_matches,
+    cv::cudev::GpuMat_<uint8_t>& d1_compact,
+    cv::cudev::GpuMat_<uint8_t>& d2_compact,
+    cv::cuda::Stream& stream);
+
+  void scores(
+     const cv::cudev::GpuMat_<uint8_t>& d1,
+     const cv::cudev::GpuMat_<uint8_t>& d2,
+     cv::cudev::GpuMat_<uint16_t>& scores,
+     cv::cuda::Stream& stream);
 };
 
 #endif

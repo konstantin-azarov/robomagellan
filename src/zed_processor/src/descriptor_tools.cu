@@ -47,4 +47,60 @@ namespace descriptor_tools {
 
    cudaSafeCall(cudaGetLastError());
   }
+
+  const int kDescsPerBlock = 8;
+  const int kThreadsPerPair = 4;
+
+  __global__ void matchGpu(
+      const cv::cudev::GlobPtr<uchar> d1,
+      const cv::cudev::GlobPtr<uchar> d2,
+      int n1, int n2,
+      cv::cudev::GlobPtr<ushort> global_scores) {
+
+    __shared__ ushort all_scores[kDescsPerBlock+1][kDescsPerBlock][kThreadsPerPair];
+    volatile ushort* scores = all_scores[threadIdx.y][threadIdx.z];
+
+    int i1 = blockDim.y * blockIdx.x + threadIdx.y;
+    int i2 = blockDim.z * blockIdx.y + threadIdx.z;
+
+    if (i1 < n1 && i2 < n2) {
+      uint tid = threadIdx.x;
+     
+
+      uint4 b1 = reinterpret_cast<const uint4*>(d1.row(i1))[tid];
+      uint4 b2 = reinterpret_cast<const uint4*>(d2.row(i2))[tid];
+   
+      scores[tid] = 
+        __popc(b1.x ^ b2.x) + 
+        __popc(b1.y ^ b2.y) + 
+        __popc(b1.z ^ b2.z) + 
+        __popc(b1.w ^ b2.w);
+      
+      scores[tid] += scores[tid + 2];
+      scores[tid] += scores[tid + 1];
+
+      if (tid == 0) {
+        global_scores(i1, i2) = scores[0];
+      }
+    }
+  }
+
+  void scores(
+      const cv::cudev::GpuMat_<uint8_t>& d1,
+      const cv::cudev::GpuMat_<uint8_t>& d2,
+      cv::cudev::GpuMat_<uint16_t>& scores,
+      cv::cuda::Stream& stream) {
+
+    int n1 = d1.rows;
+    int n2 = d2.rows;
+   
+    auto s = cv::cuda::StreamAccessor::getStream(stream);
+
+    dim3 block_dim(kThreadsPerPair, kDescsPerBlock, kDescsPerBlock);
+    dim3 grid_dim(divUp(n1, block_dim.y), divUp(n2, block_dim.z));
+
+    matchGpu<<<grid_dim, block_dim, 0, s>>>(d1, d2, n1, n2, scores);
+   
+    cudaSafeCall(cudaGetLastError());
+  }
 }

@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include <benchmark/benchmark.h>
 #include <gtest/gtest.h>
 #include <opencv2/core.hpp>
@@ -43,6 +45,46 @@ TEST(DescriptorTools, compact) {
       ASSERT_EQ(descs(idx[i].y, j), c2(i, j)) << i << ", " << j;
     }
   }
+}
+
+cv::Mat_<uchar> randomDescriptors(int n) {
+  cv::Mat_<uchar> res(n, 64);
+
+  std::default_random_engine rand(0);
+  std::uniform_int_distribution<> dist(0, 0xFFFF);
+
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 64; ++j) {
+      res[i][j] = dist(rand);
+    }
+  }
+
+  return res;
+}
+
+TEST(DescriptorTools, pairwiseScores) {
+  auto d1 = randomDescriptors(20);
+  auto d2 = randomDescriptors(20);
+
+  cv::Mat_<ushort> golden_scores(d1.rows, d2.rows);
+
+  for (int i = 0; i < d1.rows; ++i) {
+    for (int j = 0; j < d2.rows; ++j) {
+      golden_scores(i, j) = cv::norm(d1.row(i), d2.row(j), cv::NORM_HAMMING); 
+    }
+  }
+
+  cv::cudev::GpuMat_<uint8_t> d1_gpu(d1), d2_gpu(d2);
+  cv::cudev::GpuMat_<ushort> scores_gpu(d1.rows, d2.rows);
+
+  descriptor_tools::scores(
+      d1_gpu, d2_gpu, scores_gpu, cv::cuda::Stream::Null());
+
+  cv::Mat_<ushort> scores;
+  scores_gpu.download(scores);
+
+  ASSERT_EQ(0, cv::countNonZero(scores != golden_scores))
+    << golden_scores << std::endl << scores;
 }
 
 int main(int argc, char** argv) {
