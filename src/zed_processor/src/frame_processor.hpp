@@ -32,10 +32,13 @@ struct FrameData {
     points.reserve(max_points);
     descriptors_left.create(max_points, FreakGpu::kDescriptorWidth);
     descriptors_right.create(max_points, FreakGpu::kDescriptorWidth);
+    d_left.create(max_points, FreakGpu::kDescriptorWidth);
+    d_right.create(max_points, FreakGpu::kDescriptorWidth);
   }
 
   std::vector<StereoPoint> points;
   cv::Mat_<uint8_t> descriptors_left, descriptors_right;
+  cv::cudev::GpuMat_<uint8_t> d_left, d_right;
 };
 
 class FrameProcessor {
@@ -84,7 +87,8 @@ class FrameProcessor {
     PinnedVector<ushort2> keypoint_pairs_;
     CudaDeviceVector<ushort2> keypoint_pairs_gpu_;
     // Matches
-    std::vector<cv::Vec2s> matches_;
+    std::vector<ushort2> matches_;
+    CudaDeviceVector<ushort2> matches_gpu_;
 };
 
 #endif

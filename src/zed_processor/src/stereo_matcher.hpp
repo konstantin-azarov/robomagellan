@@ -23,7 +23,7 @@ class Matcher {
         int n1, int n2,
         PinnedVector<ushort2>& pairs_cpu,
         float threshold_ratio,
-        std::vector<cv::Vec2s>& matches);
+        std::vector<ushort2>& matches);
 
   private:
     struct Match {

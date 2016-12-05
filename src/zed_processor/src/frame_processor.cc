@@ -10,6 +10,7 @@
 #include <nvToolsExtCuda.h>
 
 #include "calibration_data.hpp"
+#include "descriptor_tools.hpp"
 #include "frame_processor.hpp"
 #include "math3d.hpp"
 
@@ -22,6 +23,7 @@ FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) :
     fast_l_(kMaxKeypoints*5, freak_.borderWidth()),
     fast_r_(kMaxKeypoints*5, freak_.borderWidth()),
     matcher_(kMaxKeypoints, kMaxKeypoints * 15),
+    matches_gpu_(kMaxKeypoints),
     keypoints_gpu_l_(kMaxKeypoints),
     keypoints_gpu_r_(kMaxKeypoints),
     keypoint_pairs_gpu_(kMaxKeypoints * 15) {
@@ -38,6 +40,8 @@ FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) :
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
     undistort_map_y_[i].upload(calib_->undistort_maps[i].y);
   }
+
+  matches_.reserve(kMaxKeypoints);
 
   cudaSafeCall(cudaHostAlloc(
         &keypoint_sizes_, 2*sizeof(int), cudaHostAllocDefault));
@@ -170,6 +174,17 @@ void FrameProcessor::process(
 
   auto t6 = std::chrono::high_resolution_clock::now();
 
+  matches_gpu_.upload(matches_, s[2]);
+
+  descriptor_tools::gatherDescriptors(
+      descriptors_gpu_[0],
+      descriptors_gpu_[1],
+      matches_gpu_,
+      matches_.size(),
+      frame_data.d_left,
+      frame_data.d_right,
+      s[2]);
+
   descriptors_gpu_[0].rowRange(0, n_left).download(
       frame_data.descriptors_left.rowRange(0, n_left), s[0]);
   descriptors_gpu_[1].rowRange(0, n_right).download(
@@ -178,8 +193,8 @@ void FrameProcessor::process(
   frame_data.points.resize(0);
   const auto& c = calib_->intrinsics;
   for (int t = 0; t < matches_.size(); ++t) {
-    int i = matches_[t][0];
-    int j = matches_[t][1]; 
+    int i = matches_[t].x;
+    int j = matches_[t].y; 
     auto& kp_l = keypoints_cpu_[0][i];
     auto& kp_r = keypoints_cpu_[1][j];
 

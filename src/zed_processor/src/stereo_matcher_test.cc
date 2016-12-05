@@ -8,7 +8,6 @@
 #include <opencv2/core.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
-
 #define BACKWARD_HAS_DW 1
 #include "backward.hpp"
 
@@ -61,7 +60,7 @@ PinnedVector<ushort2> randomPairs(int n_descs, int n_pairs) {
   return res;
 }
 
-std::vector<cv::Vec2s> computeMatches(
+std::vector<ushort2> computeMatches(
     const cv::Mat_<uchar>& d1,
     const cv::Mat_<uchar>& d2,
     const PinnedVector<ushort2>& pairs,
@@ -108,10 +107,10 @@ std::vector<cv::Vec2s> computeMatches(
   /* std::cout << "m1: " << cv::Mat_<int>(m1) << std::endl; */
   /* std::cout << "m2: " << cv::Mat_<int>(m2) << std::endl; */
 
-  std::vector<cv::Vec2s> res;
+  std::vector<ushort2> res;
   for (int i = 0; i < n1; ++i) {
     if (m1[i] != -1 && m2[m1[i]] == i) {
-      res.push_back(cv::Vec2s(i, m1[i]));
+      res.push_back(make_ushort2(i, m1[i]));
     }
   }
 
@@ -132,7 +131,7 @@ TEST(StereoMatcherTest, random) {
     std::make_tuple(10000, 100000, 1)
   };
 
-  std::vector<cv::Vec2s> matches;
+  std::vector<ushort2> matches;
 
   auto stream = cv::cuda::Stream::Null();
 
@@ -193,7 +192,7 @@ class MatcherBenchmarkFixture : public benchmark::Fixture {
     cv::cudev::GpuMat_<uint8_t> d1_, d2_;
     PinnedVector<ushort2> pairs_cpu_;
     CudaDeviceVector<ushort2> pairs_gpu_;
-    std::vector<cv::Vec2s> matches_;
+    std::vector<ushort2> matches_;
 };
 
 BENCHMARK_F(MatcherBenchmarkFixture, Full)(benchmark::State& st) {

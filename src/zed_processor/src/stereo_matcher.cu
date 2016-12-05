@@ -81,7 +81,7 @@ __host__ void Matcher::gatherMatches(
     int n1, int n2,
     PinnedVector<ushort2>& pairs_cpu,
     float threshold_ratio,
-    std::vector<cv::Vec2s>& matches) {
+    std::vector<ushort2>& matches) {
  
   for (auto& m : m1_) {
     m.best = m.second = m.match = 0xFFFF;
@@ -122,7 +122,7 @@ __host__ void Matcher::gatherMatches(
     if (m1.best != 0xFFFF && m1.second * 0.8 > m1.best) {
       const auto& m2 = m2_[m1.match];
       if (m2.second * 0.8 > m2.best && m2.match == i) {
-        matches.push_back(cv::Vec2s(i, m1.match));
+        matches.push_back(make_ushort2(i, m1.match));
       }
     }
   }

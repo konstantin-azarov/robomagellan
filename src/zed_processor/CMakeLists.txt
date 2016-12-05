@@ -22,9 +22,6 @@ else() # Desktop
     SET(CUDA_VERSION "8.0")
 endif()
 
-SET(CMAKE_C_COMPILER "/usr/bin/clang")
-SET(CMAKE_CXX_COMPILER "/usr/bin/clang++")
-
 include_directories("/usr/include/libusb-1.0")
 
 ## 3rd party libs
@@ -165,6 +162,22 @@ target_link_libraries(
   benchmark
   dw)
 
+cuda_add_library(
+  descriptor_tools
+  src/descriptor_tools.cu)
+
+catkin_add_gtest(
+  descriptor_tools_test
+  src/descriptor_tools_test.cc)
+
+target_link_libraries(
+  descriptor_tools_test
+  descriptor_tools
+  ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
+  benchmark
+  dw)
+
 add_library(
   math3d
   src/math3d.cc)
@@ -224,8 +237,6 @@ target_link_libraries(
   reprojection_estimator_test
   reprojection_estimator)
 
-add_test(reprojection_estimator_test reprojection_estimator_test)
-
 add_executable(
   process
   src/process.cc
@@ -244,6 +255,7 @@ add_executable(
 
 target_link_libraries(
   process
+  descriptor_tools
   math3d
   reprojection_estimator
   freak_gpu
