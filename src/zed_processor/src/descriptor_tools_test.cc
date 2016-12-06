@@ -88,6 +88,35 @@ TEST(DescriptorTools, pairwiseScores) {
     << golden_scores << std::endl << scores;
 }
 
+class ScoresBenchmark : public benchmark::Fixture {
+  public:
+    ScoresBenchmark() {
+    }
+
+    void SetUp(const benchmark::State& s) {
+      d1_.upload(randomDescriptors(kN));
+      d2_.upload(randomDescriptors(kN));
+      scores_.create(kN, kN);
+    }
+
+  protected:
+    const int kN = 1000;
+
+    cv::cudev::GpuMat_<uchar> d1_, d2_;
+    cv::cudev::GpuMat_<ushort> scores_;
+};
+
+BENCHMARK_DEFINE_F(ScoresBenchmark, scores)(benchmark::State& s) {
+  while (s.KeepRunning()) {
+    descriptor_tools::scores(d1_, d2_, scores_, cv::cuda::Stream::Null());
+    cv::cuda::Stream::Null().waitForCompletion();
+  }
+}
+
+BENCHMARK_REGISTER_F(ScoresBenchmark, scores)->UseRealTime();
+
+
+
 int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "benchmark") {
     benchmark::Initialize(&argc, argv);

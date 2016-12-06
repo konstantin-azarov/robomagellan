@@ -30,14 +30,11 @@ struct StereoPoint {
 struct FrameData {
   FrameData(int max_points) {
     points.reserve(max_points);
-    descriptors_left.create(max_points, FreakGpu::kDescriptorWidth);
-    descriptors_right.create(max_points, FreakGpu::kDescriptorWidth);
     d_left.create(max_points, FreakGpu::kDescriptorWidth);
     d_right.create(max_points, FreakGpu::kDescriptorWidth);
   }
 
   std::vector<StereoPoint> points;
-  cv::Mat_<uint8_t> descriptors_left, descriptors_right;
   cv::cudev::GpuMat_<uint8_t> d_left, d_right;
 };
 

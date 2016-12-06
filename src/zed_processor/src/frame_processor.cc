@@ -174,12 +174,6 @@ void FrameProcessor::process(
 
   auto t6 = std::chrono::high_resolution_clock::now();
 
-
-  descriptors_gpu_[0].rowRange(0, n_left).download(
-      frame_data.descriptors_left.rowRange(0, n_left), s[0]);
-  descriptors_gpu_[1].rowRange(0, n_right).download(
-      frame_data.descriptors_right.rowRange(0, n_right), s[1]);
-
   frame_data.points.resize(0);
   const auto& c = calib_->intrinsics;
   int k = 0;
@@ -217,11 +211,7 @@ void FrameProcessor::process(
       frame_data.d_right,
       s[2]);
 
-  s[0].waitForCompletion();
-  s[1].waitForCompletion();
   s[2].waitForCompletion();
-
-  cudaDeviceSynchronize();
 
   auto t7 = std::chrono::high_resolution_clock::now();
   
