@@ -11,21 +11,23 @@
 
 #include "sensor_msgs/Image.h"
 
+#include "video_reader.hpp"
+
 namespace rosbag {
   class Bag;
 }
 
-class BagVideoReader {
+class BagVideoReader : public VideoReader {
   public:
     BagVideoReader(
         const std::string& filename, 
         const std::string& topic);
 
-    ~BagVideoReader();
+    virtual ~BagVideoReader();
 
-    void skip(int cnt);
+    virtual void skip(int cnt);
 
-    bool nextFrame(cv::Mat& mat);
+    virtual bool nextFrame(cv::Mat& mat);
 
   private:
     rosbag::Bag bag_;

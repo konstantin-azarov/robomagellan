@@ -17,9 +17,11 @@
 using namespace std::chrono;
 
 
-FrameProcessor::FrameProcessor(const StereoCalibrationData& calib) : 
+FrameProcessor::FrameProcessor(
+    const StereoCalibrationData& calib,
+    const FrameProcessorConfig& config) : 
     calib_(&calib),
-    freak_(64.980350),
+    freak_(config.descriptor_radius),
     fast_l_(kMaxKeypoints*5, freak_.borderWidth()),
     fast_r_(kMaxKeypoints*5, freak_.borderWidth()),
     matcher_(kMaxKeypoints, kMaxKeypoints * 15),
@@ -61,7 +63,8 @@ cv::cuda::Stream s;
 void FrameProcessor::process(
     const cv::Mat src[], 
     int threshold,
-    FrameData& frame_data) {
+    FrameData& frame_data,
+    FrameDebugData* frame_debug_data) {
 
   nvtxRangePushA("frame_processor");
 
@@ -76,7 +79,7 @@ void FrameProcessor::process(
 
   for (int i=0; i < 2; ++i) {
   /* auto t0 = std::chrono::high_resolution_clock::now(); */
-    src_img_[i].upload(src[i], s[i]);
+   src_img_[i].upload(src[i], s[i]);
 
   /* auto t1 = std::chrono::high_resolution_clock::now(); */
     cv::cuda::remap(
@@ -177,6 +180,7 @@ void FrameProcessor::process(
   frame_data.points.resize(0);
   const auto& c = calib_->intrinsics;
   int k = 0;
+  std::cout << "XCXC " << c.dr << ", " << c.cx << ", " << c.cy << std::endl;
   for (int t = 0; t < matches_.size(); ++t) {
     int i = matches_[t].x;
     int j = matches_[t].y; 
@@ -225,6 +229,11 @@ void FrameProcessor::process(
     << std::endl;
 
   nvtxRangePop();
+
+  if (frame_debug_data != nullptr) {
+    undistorted_image_gpu_[0].download(frame_debug_data->undistorted_image[0]);
+    undistorted_image_gpu_[1].download(frame_debug_data->undistorted_image[1]);
+  }
 }
 
 void FrameProcessor::computeKpPairs_(

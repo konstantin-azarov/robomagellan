@@ -38,9 +38,19 @@ struct FrameData {
   cv::cudev::GpuMat_<uint8_t> d_left, d_right;
 };
 
+struct FrameDebugData {
+  cv::Mat undistorted_image[2];
+};
+
+struct FrameProcessorConfig {
+  float descriptor_radius = 64.980350;
+};
+
 class FrameProcessor {
   public:
-    FrameProcessor(const StereoCalibrationData& calib);
+    FrameProcessor(
+        const StereoCalibrationData& calib,
+        const FrameProcessorConfig& config);
     ~FrameProcessor();
     
     FrameProcessor(const FrameProcessor&) = delete;
@@ -49,7 +59,8 @@ class FrameProcessor {
     void process(
         const cv::Mat src[], 
         int threshold,
-        FrameData& frame_data);
+        FrameData& frame_data,
+        FrameDebugData* frame_debug_data);
 
   private:
     static void computeKpPairs_(

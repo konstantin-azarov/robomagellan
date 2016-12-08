@@ -12,11 +12,15 @@
 class DebugRenderer {
   public:
     DebugRenderer(
-        const FrameProcessor* p1,
-        const FrameProcessor* p2,
-        const CrossFrameProcessor* cfp,
-        const DirectionTracker* direction_tracker, 
-        const MonoCalibrationData* mono_calibration,
+        const StereoCalibrationData& calib,
+        const FrameData& f1,
+        const FrameDebugData& fd1,
+        const FrameData& f2,
+        const FrameDebugData& fd2,
+        const CrossFrameDebugData& cfp,
+        Eigen::Affine3d* gt,
+//        const DirectionTracker* direction_tracker, 
+//        const MonoCalibrationData* mono_calibration,
         int max_width, int max_height);
 
     bool loop();
@@ -41,7 +45,8 @@ class DebugRenderer {
     void renderCliqueMatches();
 
     void renderReprojectionFeatures(
-        const std::vector<ReprojectionFeatureWithError>& features);
+        const std::vector<ReprojectionFeatureWithError>& features,
+        Eigen::Affine3d t);
 
     void renderCliqueFeatures();
 
@@ -68,10 +73,13 @@ class DebugRenderer {
     double scale_;
     int w_, h_;
 
-    const FrameProcessor *p1_, *p2_;
-    const CrossFrameProcessor* cfp_;
-    const DirectionTracker* dt_;
-    const MonoCalibrationData* mono_calibration_;
+    const StereoCalibrationData& calib_;
+
+    const FrameData& f1_, f2_;
+    const FrameDebugData& fd1_, fd2_;
+    const CrossFrameDebugData& cfd_;
+
+    const Eigen::Affine3d* ground_truth_;
     
     cv::Mat img_;
     std::pair<int, int> selection_;

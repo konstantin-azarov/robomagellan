@@ -18,6 +18,8 @@ struct RawMonoCalibrationData {
 
 struct RawStereoCalibrationData {
   static RawStereoCalibrationData read(const std::string& filename);
+  static RawStereoCalibrationData readKitti(
+      const std::string& filename, cv::Size img_size);
   void write(const std::string& filename);
 
   cv::Size size;

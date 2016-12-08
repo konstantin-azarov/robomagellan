@@ -50,6 +50,13 @@ struct ReprojectionFeatureWithError : public StereoReprojectionFeature {
   double error;
 };
 
+struct CrossFrameDebugData {
+  std::vector<ReprojectionFeatureWithError> all_reprojection_features,
+      clique_reprojection_features,
+      inlier_reprojection_features;
+  Eigen::Affine3d t_clique_, t_inlier_;
+};
+
 class CrossFrameProcessor {
   public:
     CrossFrameProcessor(
@@ -60,35 +67,9 @@ class CrossFrameProcessor {
         const FrameData& p1, const FrameData& p2,
         Eigen::Quaterniond& r, 
         Eigen::Vector3d& t,
-        Eigen::Matrix3d* t_cov);
+        Eigen::Matrix3d* t_cov,
+        CrossFrameDebugData* debug_data);
    
-    const std::vector<CrossFrameMatch>& fullMatches() const { 
-      return full_matches_; 
-    }
-
-    const std::vector<int>& filteredMatches() const {
-      return filtered_matches_;
-    }
-
-    const std::vector<int>& clique() const {
-      return clique_.clique();
-    }
-
-    const std::vector<ReprojectionFeatureWithError>& cliqueFeatures() const { 
-      return clique_reprojection_features_;
-    }
-
-    const std::vector<ReprojectionFeatureWithError>& inlierFeatures() const {
-      return filtered_reprojection_features_;
-    }
-
-    const StereoCalibrationData& calibration() const { 
-      return calibration_;
-    }
-
-/*    const std::vector<ReprojectionFeature>& reprojectionFeatures() const {
-      return reprojection_features_;
-    }*/
   private:
     void match(
         const FrameData& p1, 
@@ -118,7 +99,8 @@ class CrossFrameProcessor {
     bool estimatePose_(
         Eigen::Quaterniond& r, 
         Eigen::Vector3d& t,
-        Eigen::Matrix3d* t_cov);
+        Eigen::Matrix3d* t_cov,
+        CrossFrameDebugData* debug_data);
 
     void estimateOne_(
         const std::vector<ReprojectionFeatureWithError>& features,

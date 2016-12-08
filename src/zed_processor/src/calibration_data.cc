@@ -1,5 +1,7 @@
-#include <opencv2/opencv.hpp>
+#include <fstream>
 #include <string>
+
+#include <opencv2/opencv.hpp>
 
 #include "calibration_data.hpp"
 
@@ -60,6 +62,55 @@ RawStereoCalibrationData RawStereoCalibrationData::read(
   return res;
 }
 
+RawStereoCalibrationData RawStereoCalibrationData::readKitti(
+    const std::string& filename,
+    cv::Size img_size) {
+  std::ifstream f(filename);
+  if (!f.is_open()) {
+    std::cerr << "File not found: " << filename << std::endl;
+    abort();
+  }
+
+  auto read_camera_mat = [&f]() {
+    std::string name;
+    f >> name;
+
+    cv::Mat_<double> m(3, 4);
+    for (int i = 0; i < 3; ++i) {
+      for (int j = 0; j < 4; ++j ) {
+        f >> m(i, j);
+      }
+    }
+
+    return m;
+  };
+
+  RawStereoCalibrationData res;
+  res.size = img_size;
+
+  auto m = read_camera_mat();
+  res.left_camera.m = m.colRange(0, 3);
+  if (cv::countNonZero(m.col(3))) {
+    abort();
+  }
+  res.left_camera.d = cv::Mat_<double>::zeros(1, 5);
+
+  m = read_camera_mat();
+  res.right_camera.m = m.colRange(0, 3);
+  if (cv::countNonZero(m.col(3).rowRange(1, 3))) {
+    abort();
+  }
+  res.right_camera.d = cv::Mat_<double>::zeros(1, 5);
+
+  res.R = cv::Mat_<double>::eye(3, 3);
+
+  cv::Mat_<double> t = cv::Mat_<double>::zeros(3, 1);
+  t(0, 0) = 1000 * (m(0, 3)/m(0, 0));
+  res.T = t;
+
+  return res;
+}
+
 void RawStereoCalibrationData::write(const std::string& filename) {
   cv::FileStorage fs(filename, cv::FileStorage::WRITE);
 
@@ -103,21 +154,27 @@ StereoCalibrationData::StereoCalibrationData(
       CV_32FC1,
       undistort_maps[1].x, undistort_maps[1].y);
 
-  assert(Pl.rows == 3 && Pl.cols == 4);
-  assert(Pr.rows == 3 && Pr.cols == 4);
+  auto verify = [](bool p) {
+    if (!p) {
+      abort();
+    }
+  };
+
+  verify(Pl.rows == 3 && Pl.cols == 4);
+  verify(Pr.rows == 3 && Pr.cols == 4);
 
   const cv::Mat_<double>& P1 = static_cast<const cv::Mat_<double>&>(Pl);
   const cv::Mat_<double>& P2 = static_cast<const cv::Mat_<double>&>(Pr);
 
   intrinsics.f = P1(0, 0);
-  assert(P1(1, 1) == intrinsics.f && 
+  verify(P1(1, 1) == intrinsics.f && 
       P2(0, 0) == intrinsics.f && 
       P2(1, 1) == intrinsics.f);
   intrinsics.dr = P2(0, 3); 
   
   intrinsics.cx = P1(0, 2);
-  assert(P2(0, 2) == intrinsics.cx);
+  verify(P2(0, 2) == intrinsics.cx);
 
   intrinsics.cy = P1(1, 2);
-  assert(P2(1, 2) == intrinsics.cy);
+  verify(P2(1, 2) == intrinsics.cy);
 }

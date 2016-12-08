@@ -14,10 +14,10 @@ CrossFrameProcessor::CrossFrameProcessor(
   : calibration_(calibration), 
     reprojection_estimator_(&calibration.intrinsics),
     config_(config) {
-  scores_left_.create(1100, 1100);
-  scores_left_gpu_.create(1100, 1100);
-  scores_right_.create(1100, 1100);
-  scores_right_gpu_.create(1100, 1100);
+  scores_left_.create(2000, 2000);
+  scores_left_gpu_.create(2000, 2000);
+  scores_right_.create(2000, 2000);
+  scores_right_gpu_.create(2000, 2000);
 }
 
 bool CrossFrameProcessor::process(
@@ -25,7 +25,8 @@ bool CrossFrameProcessor::process(
     const FrameData& p2,
     Eigen::Quaterniond& r, 
     Eigen::Vector3d& t,
-    Eigen::Matrix3d* t_cov) {
+    Eigen::Matrix3d* t_cov,
+    CrossFrameDebugData* debug_data) {
   auto t0 = std::chrono::high_resolution_clock::now();
 
   const auto& points1 = p1.points;
@@ -102,14 +103,19 @@ bool CrossFrameProcessor::process(
   
   fillReprojectionFeatures_(p1, p2);
 
+  if (debug_data != nullptr) {
+    debug_data->all_reprojection_features = all_reprojection_features_;
+  }
+
   // --
 
   auto t2 = std::chrono::high_resolution_clock::now();
 
   buildClique_(p1, p2);
+
   auto t3 = std::chrono::high_resolution_clock::now();
 
-  if (!estimatePose_(r, t, t_cov)) {
+  if (!estimatePose_(r, t, t_cov, debug_data)) {
     return false;
   }
 
@@ -270,7 +276,8 @@ double CrossFrameProcessor::fillReprojectionErrors_(
 bool CrossFrameProcessor::estimatePose_(
     Eigen::Quaterniond& r, 
     Eigen::Vector3d& t,
-    Eigen::Matrix3d* t_cov) {
+    Eigen::Matrix3d* t_cov,
+    CrossFrameDebugData* debug_data) {
   if (clique_reprojection_features_.size() < 
         config_.min_features_for_estimation) {
     return false;
@@ -281,6 +288,11 @@ bool CrossFrameProcessor::estimatePose_(
   auto initial_reprojection_error = fillReprojectionErrors_(
       r, t,
       clique_reprojection_features_);
+
+  if (debug_data != nullptr) {
+    debug_data->clique_reprojection_features = clique_reprojection_features_;
+    debug_data->t_clique_ = Eigen::Translation3d(t)*r;
+  }
 
   std::sort(
       clique_reprojection_features_.begin(),
@@ -316,6 +328,11 @@ bool CrossFrameProcessor::estimatePose_(
   double final_error = fillReprojectionErrors_(
       r, t,
       filtered_reprojection_features_);
+
+  if (debug_data != nullptr) {
+    debug_data->inlier_reprojection_features = filtered_reprojection_features_;
+    debug_data->t_inlier_ = Eigen::Translation3d(t)*r;
+  }
 
   std::cout
       << "clique_err=" << initial_reprojection_error

@@ -248,6 +248,7 @@ add_executable(
   src/direction_target.cc
   src/direction_tracker.cc
   src/frame_processor.cc
+  src/kitti_video_reader.cc
   src/raw_video_reader.cc
   src/rigid_estimator.cc
   src/utils.cc

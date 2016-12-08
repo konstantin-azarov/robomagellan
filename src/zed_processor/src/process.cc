@@ -19,6 +19,7 @@
 #include "direction_target.hpp"
 #include "fps_meter.hpp"
 #include "frame_processor.hpp"
+#include "kitti_video_reader.hpp"
 #include "math3d.hpp"
 #include "reprojection_estimator.hpp"
 #include "rigid_estimator.hpp"
@@ -31,20 +32,48 @@ namespace po = boost::program_options;
 
 backward::SignalHandling sh;
 
+typedef std::pair<Eigen::Quaterniond, Eigen::Vector3d> Transform;
+
+std::vector<Transform> readTransforms(const std::string& filename) {
+  std::ifstream f(filename);
+
+  std::vector<Transform> res;
+
+  while (!f.eof()) {
+    double rot_m[9];
+    double t_data[3];
+
+    for (int i=0; i < 3; ++i) {
+      for (int j=0; j < 3; ++j) {
+        f >> rot_m[i*3 + j];
+      }
+      f >> t_data[i] >> std::skipws;
+    }
+
+    Eigen::Quaterniond rot{Eigen::Matrix3d(rot_m)};
+    Eigen::Vector3d t(t_data);
+
+    res.push_back(std::make_pair(rot, t));
+  }
+
+  return res;
+}
+
 int main(int argc, char** argv) {
   string video_file, direction_file, calib_file, mono_calib_file;
   string path_trace_file;
   int start;
   bool debug;
+  std::string kitti_basedir, kitti_dataset;
   int frame_count;
 
   po::options_description desc("Command line options");
   desc.add_options()
       ("video-file",
-       po::value<string>(&video_file)->required(),
+       po::value<string>(&video_file),
        "path to the video file")
       ("direction-file",
-       po::value<string>(&direction_file)->required(),
+       po::value<string>(&direction_file),
        "path to the direction file")
       ("start-frame",
        po::value<int>(&start)->default_value(0),
@@ -53,7 +82,7 @@ int main(int argc, char** argv) {
        po::value<int>(&frame_count)->default_value(0),
        "number of frames to process")
       ("calib-file",
-       po::value<string>(&calib_file)->default_value("data/calib.yml"),
+       po::value<string>(&calib_file),
        "path to the calibration file")
       ("mono-calib-file",
        po::value<string>(&mono_calib_file)->default_value(
@@ -62,6 +91,12 @@ int main(int argc, char** argv) {
       ("path-trace-file",
        po::value<string>(&path_trace_file),
        "save calculated path to the file")
+      ("kitti-basedir",
+       po::value<string>(&kitti_basedir),
+       "Kitti datasets directory")
+      ("kitti-dataset-name",
+       po::value<string>(&kitti_dataset),
+       "Analyze a KITTI sequence")
       ("debug",
        po::bool_switch(&debug)->default_value(false),
        "Start in debug mode.");
@@ -70,7 +105,28 @@ int main(int argc, char** argv) {
   po::store(po::parse_command_line(argc, argv, desc), vm);
   po::notify(vm);
 
-  StereoCalibrationData calib(RawStereoCalibrationData::read(calib_file));
+  RawStereoCalibrationData raw_calib;
+
+  std::unique_ptr<VideoReader> rdr;
+  if (kitti_dataset.empty()) {
+    if (calib_file.empty() || video_file.empty()) {
+      std::cerr << "--calib_file and --video-file should be specified when "
+        << "--kitti_dataset is not" << std::endl;
+      exit(1);
+    }
+    raw_calib = RawStereoCalibrationData::read(calib_file);
+    rdr.reset(new BagVideoReader(video_file, "/image_raw"));
+  } else {
+    auto kitti_reader = new KittiVideoReader(
+        kitti_basedir + "/sequences/" + kitti_dataset);
+    rdr.reset(kitti_reader);
+    raw_calib = RawStereoCalibrationData::readKitti(
+        kitti_basedir + "/sequences/" + kitti_dataset + "/calib.txt", 
+        kitti_reader->imgSize());
+    raw_calib.write("/tmp/kitti-calib.yml");
+  }
+
+  StereoCalibrationData calib(raw_calib);
   MonoCalibrationData mono_calibration(
     RawMonoCalibrationData::read(mono_calib_file),
     calib.Pl.colRange(0, 3),
@@ -79,7 +135,6 @@ int main(int argc, char** argv) {
   int frame_width = calib.raw.size.width;
   int frame_height = calib.raw.size.height;
 
-  BagVideoReader rdr(video_file, "/image_raw");
   cv::Mat frame_mat;
   //frame_mat.allocator = cv::cuda::HostMem::getAllocator(cv::cuda::HostMem::PAGE_LOCKED);
   frame_mat.create(frame_height, frame_width*2, CV_8UC1);
@@ -88,16 +143,24 @@ int main(int argc, char** argv) {
     frame_mat(cv::Range::all(), cv::Range(frame_width, frame_width*2))
   };
 
-  rdr.skip(start);
+  rdr->skip(start);
     
   int global_frame_index = start-1;
 
-  FrameProcessor frame_processor(calib);
+  FrameProcessorConfig config;
+  config.descriptor_radius = 40;
+  FrameProcessor frame_processor(calib, config);
+
+  int threshold = 20;
 
   FrameData frame_data[2] = {
     FrameData(kMaxKeypoints),
     FrameData(kMaxKeypoints)
   };
+
+  FrameDebugData frame_debug_data[2];
+
+  CrossFrameDebugData cross_frame_debug_data;
 
 
   CrossFrameProcessorConfig cross_processor_config;
@@ -111,12 +174,16 @@ int main(int argc, char** argv) {
   double frameDt = 1.0/60.0;
 
   int frame_index = -1;
-  int threshold = 25;
 
   std::vector<cv::Point2d> img_keypoints;
 
   e::Quaterniond cam_r(1, 0, 0, 0);
   e::Vector3d cam_t(0, 0, 0);
+  std::vector<Transform> ground_truth;
+  if (!kitti_dataset.empty()) {
+    ground_truth = readTransforms(
+        kitti_basedir + "/poses/" + kitti_dataset + ".txt");
+  }
 
   FILE* trace_file = nullptr;
   if (!path_trace_file.empty()) {
@@ -130,7 +197,7 @@ int main(int argc, char** argv) {
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
     Timer timer;
 
-    if (!rdr.nextFrame(frame_mat)) {
+    if (!rdr->nextFrame(frame_mat)) {
       break;
     }
 
@@ -141,42 +208,39 @@ int main(int argc, char** argv) {
 
     timer.mark("read");
 
-    FrameData& cur_frame = frame_data[frame_index % 2];
-    FrameData& prev_frame = frame_data[1 - (frame_index % 2)];
+    int cur_index = frame_index % 2;
+    int prev_index = 1 - (frame_index % 2);
+    FrameData& cur_frame = frame_data[cur_index];
+    FrameData& prev_frame = frame_data[prev_index];
 
-    frame_processor.process(mono_frames, threshold, cur_frame);
+    frame_processor.process(
+        mono_frames, threshold, cur_frame, 
+        debug ? &frame_debug_data[cur_index] : nullptr);
 
     timer.mark("process");
+    
+    e::Affine3d gt;
+    if (!ground_truth.empty()) {
+      auto p = ground_truth[global_frame_index - 1];
+      auto g = ground_truth[global_frame_index];
+      gt = (e::Translation3d(p.second) * p.first).inverse() * 
+        e::Translation3d(g.second) * g.first;
+    }
   
-    /* img_keypoints.resize(0); */
-    /* for (const auto& kp : processor.keypoints(0)) { */
-    /*   img_keypoints.push_back(cv::Point2d(kp.x, kp.y)); */
-    /* } */
-
-    /* bool dir_found = */
-    /*   direction_tracker.process(img_keypoints, processor.descriptors(0)); */
-
-    /* if (dir_found) { */
-    /*   std::cout */ 
-    /*     << "Rypr = " */ 
-    /*     << rotToEuler(direction_tracker.rot()) * 180 / M_PI << std::endl; */
-    /* } */
-
-    timer.mark("dir");
-
     if (frame_index > 0) {
       e::Quaterniond d_r;
       e::Vector3d d_t;
       e::Matrix3d t_cov;
       bool ok = cross_processor.process(
-          prev_frame, cur_frame, d_r, d_t, &t_cov);
+          prev_frame, cur_frame, d_r, d_t, &t_cov, &cross_frame_debug_data);
 
       timer.mark("cross");
 
       if (ok) {
-        if (!(t_cov(0, 0) < 5 && t_cov(1, 1) < 5 && t_cov(2, 2) < 5)) {
+        if (!(t_cov(0, 0) < 20 && t_cov(1, 1) < 20 && t_cov(2, 2) < 20)) {
           std::cout << "FAIL";
           std::cout << "T_cov = " << t_cov << std::endl; 
+          std::cout << "t = " << d_t << std::endl;
         } else {
           cam_t += cam_r*d_t;
           cam_r = cam_r*d_r;
@@ -188,7 +252,16 @@ int main(int argc, char** argv) {
                   << ", pitch = " << ypr.y() 
                   << ", roll = " << ypr.z() << endl;
         std::cout << "T = " << cam_t.transpose() << endl; 
-        /* std::cout << "T_cov = " << cross_processor.t_cov() << std::endl; */
+        std::cout << "T_cov = " << t_cov << std::endl;
+
+        if (!ground_truth.empty()) {
+          auto ypr_gt = rotToYawPitchRoll(e::Quaterniond(gt.rotation()));
+          auto t_gt = gt.translation();
+          std::cout << "GT: yaw = " << ypr_gt.x() 
+                    << ", pitch = " << ypr_gt.y() 
+                    << ", roll = " << ypr_gt.z() << endl;
+          std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; 
+        }
 
         if (trace_file != nullptr) {
           fprintf(trace_file, "%d 1 %.5f %.5f %.5f %.5f %.5f %.5f %.5f\n",
@@ -207,16 +280,19 @@ int main(int argc, char** argv) {
     std::cout << "Times: " << timer.str() << std::endl;
 
     if (frame_index > 0 && debug) {
-      /* DebugRenderer renderer( */
-      /*     p1, */ 
-      /*     &processor, */ 
-      /*     &cross_processor, */ 
-      /*     &direction_tracker, */
-      /*     &mono_calibration, */
-      /*     1600, 1200); */
-      /* if (!renderer.loop()) { */
-      /*   break; */
-      /* } */
+
+      DebugRenderer renderer(
+          calib,
+          frame_data[prev_index],
+          frame_debug_data[prev_index],
+          frame_data[cur_index],
+          frame_debug_data[cur_index],
+          cross_frame_debug_data,
+          ground_truth.empty() ? nullptr : &gt,
+          1920, 1080);
+      if (!renderer.loop()) {
+        break;
+      }
     }
   }
 
