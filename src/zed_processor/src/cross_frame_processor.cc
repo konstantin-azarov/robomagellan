@@ -8,21 +8,24 @@
 
 using namespace std::chrono;
 
+const int maxPoints = 4000;
+
 CrossFrameProcessor::CrossFrameProcessor(
     const StereoCalibrationData& calibration,
     const CrossFrameProcessorConfig& config) 
   : calibration_(calibration), 
     reprojection_estimator_(&calibration.intrinsics),
     config_(config) {
-  scores_left_.create(2000, 2000);
-  scores_left_gpu_.create(2000, 2000);
-  scores_right_.create(2000, 2000);
-  scores_right_gpu_.create(2000, 2000);
+  scores_left_.create(4000, 4000);
+  scores_left_gpu_.create(4000, 4000);
+  scores_right_.create(4000, 4000);
+  scores_right_gpu_.create(4000, 4000);
 }
 
 bool CrossFrameProcessor::process(
     const FrameData& p1, 
     const FrameData& p2,
+    bool use_initial_estimate,
     Eigen::Quaterniond& r, 
     Eigen::Vector3d& t,
     Eigen::Matrix3d* t_cov,
@@ -49,8 +52,10 @@ bool CrossFrameProcessor::process(
       scores_right_gpu_,
       cv::cuda::Stream::Null());
 
-  scores_left_gpu_.download(scores_left_);
-  scores_right_gpu_.download(scores_right_);
+  scores_left_gpu_.rowRange(0, n1).colRange(0, n2).download(
+      scores_left_.rowRange(0, n1).colRange(0, n2));
+  scores_right_gpu_.rowRange(0, n1).colRange(0, n2).download(
+      scores_right_.rowRange(0, n1).colRange(0, n2));
 
   match(p1, p2, scores_left_, scores_right_, n1, n2, matches_[0]);
   match(p2, p1, scores_left_.t(), scores_right_.t(), n2, n1, matches_[1]);
@@ -111,11 +116,13 @@ bool CrossFrameProcessor::process(
 
   auto t2 = std::chrono::high_resolution_clock::now();
 
-  buildClique_(p1, p2);
+  if (!use_initial_estimate) {
+    buildClique_(p1, p2);
+  }
 
   auto t3 = std::chrono::high_resolution_clock::now();
 
-  if (!estimatePose_(r, t, t_cov, debug_data)) {
+  if (!estimatePose_(use_initial_estimate, r, t, t_cov, debug_data)) {
     return false;
   }
 
@@ -123,7 +130,7 @@ bool CrossFrameProcessor::process(
   
   std::cout 
     << "matches = " << full_matches_.size() 
-    << " clique = " << clique_reprojection_features_.size() 
+//    s< " clique = " << clique_reprojection_features_.size() 
     << "; t:"
     << " setup = " << duration_cast<milliseconds>(t1 - t0).count()
     << " match = " << duration_cast<milliseconds>(t2 - t1).count()
@@ -188,9 +195,9 @@ void CrossFrameProcessor::buildClique_(
       double dl1 = deltaL(m1.p1, m2.p1);
       double dl2 = deltaL(m1.p2, m2.p2);
 
-      if (m1.p1.z < 10000 && m1.p2.z < 10000 && 
-          m2.p1.z < 10000 && m2.p2.z < 10000 &&
-          std::abs(l1 - l2) < std::min(3*std::sqrt(dl1*dl1 + dl2*dl2), 1000.0)) {
+      if (m1.p1.z < 20000 && m1.p2.z < 20000 && 
+          m2.p1.z < 20000 && m2.p2.z < 20000 &&
+          std::abs(l1 - l2) < std::min(3*std::sqrt(dl1*dl1 + dl2*dl2), 2000.0)) {
         clique_.addEdge(filtered_matches_[i], filtered_matches_[j]);
       }
     }
@@ -198,9 +205,9 @@ void CrossFrameProcessor::buildClique_(
 
   const std::vector<int>& clique = clique_.compute();
 
-  clique_reprojection_features_.resize(0);
+  filtered_reprojection_features_.resize(0);
   for (int i : clique) {
-    clique_reprojection_features_.push_back(all_reprojection_features_[i]);
+    filtered_reprojection_features_.push_back(all_reprojection_features_[i]);
   }
 }
 
@@ -274,76 +281,52 @@ double CrossFrameProcessor::fillReprojectionErrors_(
 }
 
 bool CrossFrameProcessor::estimatePose_(
+    bool use_initial_estimate,
     Eigen::Quaterniond& r, 
     Eigen::Vector3d& t,
-    Eigen::Matrix3d* t_cov,
+    Eigen::Matrix3d* t_cov, 
     CrossFrameDebugData* debug_data) {
-  if (clique_reprojection_features_.size() < 
-        config_.min_features_for_estimation) {
-    return false;
-  }
-
-  estimateOne_(clique_reprojection_features_, r, t, nullptr);
-
-  auto initial_reprojection_error = fillReprojectionErrors_(
-      r, t,
-      clique_reprojection_features_);
 
   if (debug_data != nullptr) {
-    debug_data->clique_reprojection_features = clique_reprojection_features_;
-    debug_data->t_clique_ = Eigen::Translation3d(t)*r;
+    debug_data->reprojection_features.clear();
   }
 
-  std::sort(
-      clique_reprojection_features_.begin(),
-      clique_reprojection_features_.end(),
-      [](const ReprojectionFeatureWithError& a,
-         const ReprojectionFeatureWithError& b) {
-        return a.error < b.error;
-      });
+  double reprojection_error;
 
-  // Reestimate using best features from the clique.
-  if (clique_reprojection_features_.size() > 5) {
-    filtered_reprojection_features_.resize(0);
-    for (const auto& f : clique_reprojection_features_) {
-       if (f.error < config_.inlier_threshold) {
+  for (int i=0; i < 10; ++ i) {
+    if (i > 0 || !use_initial_estimate) {
+      estimateOne_(filtered_reprojection_features_, r, t, t_cov);
+
+      reprojection_error = fillReprojectionErrors_(
+          r, t,
+          filtered_reprojection_features_);
+      
+      if (debug_data != nullptr) {
+        debug_data->reprojection_features.push_back(
+            filtered_reprojection_features_);
+        debug_data->pose_estimations.push_back(Eigen::Translation3d(t)*r);
+      }
+    }
+
+    fillReprojectionErrors_(r, t, all_reprojection_features_);
+
+    std::cout << "Step " << i << ":" 
+      << " features = " << filtered_reprojection_features_.size()
+      << " err = " << reprojection_error
+      << std::endl;
+
+    filtered_reprojection_features_.clear();
+    for (const auto& f : all_reprojection_features_) {
+      if (f.error < config_.inlier_threshold) {
         filtered_reprojection_features_.push_back(f);
       }
     }
-    estimateOne_(filtered_reprojection_features_, r, t, nullptr);
   }
 
-  // Reestimate using all good features.
-  fillReprojectionErrors_(
-      r, t,
-      all_reprojection_features_);
-  filtered_reprojection_features_.resize(0);
-  for (const auto& f : all_reprojection_features_) {
-    if (f.error < config_.inlier_threshold) {
-      filtered_reprojection_features_.push_back(f);
-    }
-  }
 
-  estimateOne_(filtered_reprojection_features_, r, t, t_cov);
-  double final_error = fillReprojectionErrors_(
-      r, t,
-      filtered_reprojection_features_);
-
-  if (debug_data != nullptr) {
-    debug_data->inlier_reprojection_features = filtered_reprojection_features_;
-    debug_data->t_inlier_ = Eigen::Translation3d(t)*r;
-  }
-
-  std::cout
-      << "clique_err=" << initial_reprojection_error
-      << " final_err=" << final_error
-      << " clique_n=" << clique_reprojection_features_.size()
-      << " all_n=" << filtered_reprojection_features_.size()
-      << std::endl;
-
-  bool success = final_error < 5.0;
+  bool success = reprojection_error < 5.0;
   if (!success) {
-    std::cout << "Failure: " << final_error << std::endl;
+    std::cout << "Failure: " << reprojection_error << std::endl;
   }
   return success;
 }

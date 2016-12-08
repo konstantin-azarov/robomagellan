@@ -185,13 +185,14 @@ int main(int argc, char** argv) {
         kitti_basedir + "/poses/" + kitti_dataset + ".txt");
   }
 
-  FILE* trace_file = nullptr;
+  std::ofstream trace;
   if (!path_trace_file.empty()) {
-    trace_file = fopen(path_trace_file.c_str(), "w");
-    if (trace_file == nullptr) {
-      abort();
-    }
+    trace.open(path_trace_file.c_str(), ios::out);
   }
+
+  e::Quaterniond d_r;
+  e::Vector3d d_t;
+  bool have_valid_estimate = false;
 
   bool done = false;
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
@@ -219,20 +220,23 @@ int main(int argc, char** argv) {
 
     timer.mark("process");
     
-    e::Affine3d gt;
+    e::Affine3d gt_d;
     if (!ground_truth.empty()) {
       auto p = ground_truth[global_frame_index - 1];
       auto g = ground_truth[global_frame_index];
-      gt = (e::Translation3d(p.second) * p.first).inverse() * 
+      gt_d = (e::Translation3d(p.second) * p.first).inverse() * 
         e::Translation3d(g.second) * g.first;
     }
   
     if (frame_index > 0) {
-      e::Quaterniond d_r;
-      e::Vector3d d_t;
-      e::Matrix3d t_cov;
+       e::Matrix3d t_cov;
       bool ok = cross_processor.process(
-          prev_frame, cur_frame, d_r, d_t, &t_cov, &cross_frame_debug_data);
+          prev_frame, cur_frame, 
+          /*have_valid_estimate*/ false, 
+          d_r, d_t, 
+          &t_cov, &cross_frame_debug_data);
+
+      have_valid_estimate = ok;
 
       timer.mark("cross");
 
@@ -241,6 +245,7 @@ int main(int argc, char** argv) {
           std::cout << "FAIL";
           std::cout << "T_cov = " << t_cov << std::endl; 
           std::cout << "t = " << d_t << std::endl;
+          have_valid_estimate = false;
         } else {
           cam_t += cam_r*d_t;
           cam_r = cam_r*d_r;
@@ -255,28 +260,28 @@ int main(int argc, char** argv) {
         std::cout << "T_cov = " << t_cov << std::endl;
 
         if (!ground_truth.empty()) {
-          auto ypr_gt = rotToYawPitchRoll(e::Quaterniond(gt.rotation()));
-          auto t_gt = gt.translation();
+          auto gt = ground_truth[global_frame_index];
+          auto ypr_gt = rotToYawPitchRoll(gt.first);
+          auto t_gt = gt.second;
           std::cout << "GT: yaw = " << ypr_gt.x() 
                     << ", pitch = " << ypr_gt.y() 
                     << ", roll = " << ypr_gt.z() << endl;
           std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; 
         }
 
-        if (trace_file != nullptr) {
-          fprintf(trace_file, "%d 1 %.5f %.5f %.5f %.5f %.5f %.5f %.5f\n",
-              global_frame_index,
-              cam_t.x(), cam_t.y(), cam_t.z(), 
-              cam_r.w(), cam_r.x(), cam_r.y(), cam_r.z());
-        }
-      } else {
-        if (trace_file) {
-          fprintf(trace_file, "%d 0\n", global_frame_index);
-        }
-        std::cout << "FAIL" << std::endl;
       }
     }
 
+    if (trace.is_open()) {
+      Eigen::Affine3d t = Eigen::Translation3d(cam_t) * cam_r;
+
+      for (int i=0; i < 3; ++i) {
+        for (int j=0; j < 4; ++j) {
+          trace << std::setprecision(10) << t.matrix().data()[j*4 + i] << " ";
+        }
+      }
+      trace << std::endl;
+    }
     std::cout << "Times: " << timer.str() << std::endl;
 
     if (frame_index > 0 && debug) {
@@ -288,16 +293,12 @@ int main(int argc, char** argv) {
           frame_data[cur_index],
           frame_debug_data[cur_index],
           cross_frame_debug_data,
-          ground_truth.empty() ? nullptr : &gt,
+          ground_truth.empty() ? nullptr : &gt_d,
           1920, 1080);
       if (!renderer.loop()) {
         break;
       }
     }
-  }
-
-  if (trace_file != nullptr) {
-    fclose(trace_file);
   }
 
   return 0;

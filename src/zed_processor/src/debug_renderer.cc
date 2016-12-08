@@ -53,10 +53,9 @@ bool DebugRenderer::loop() {
   bool show_features = false, 
        show_matches = false,
        show_all_reprojection_features = false,
-       show_clique = false,
-       show_clique_cross_features = false,
-       show_inlier_features = false,
        use_ground_truth = false;
+
+  int reprojection_features_set_idx = 0;
 
 
   while (!done) {
@@ -74,19 +73,15 @@ bool DebugRenderer::loop() {
       if (show_all_reprojection_features) {
         renderReprojectionFeatures(
             cfd_.all_reprojection_features,
-            use_ground_truth ? *ground_truth_ : cfd_.t_inlier_);
+            use_ground_truth ? *ground_truth_ : 
+              cfd_.pose_estimations.back());
       }
 
-      if (show_clique_cross_features) {
+      if (reprojection_features_set_idx) {
         renderReprojectionFeatures(
-            cfd_.clique_reprojection_features,
-            use_ground_truth ? *ground_truth_ : cfd_.t_clique_);
-      }
-
-      if (show_inlier_features) {
-        renderReprojectionFeatures(
-            cfd_.inlier_reprojection_features,
-            use_ground_truth ? *ground_truth_ : cfd_.t_inlier_);
+            cfd_.reprojection_features[reprojection_features_set_idx - 1],
+            use_ground_truth ? *ground_truth_ : 
+              cfd_.pose_estimations[reprojection_features_set_idx - 1]);
       }
     }
 /*     } else { */
@@ -128,22 +123,22 @@ bool DebugRenderer::loop() {
 /*       case 'c': */
 /*         show_clique = !show_clique; */
 /*         break; */
-      case '0':
+      case 'a':
         show_all_reprojection_features = !show_all_reprojection_features;
         break;
-      case '1':
-        show_clique_cross_features = !show_clique_cross_features;
-        break;
-      case '2':
-        show_inlier_features = !show_inlier_features;
+      case 'f':
+        reprojection_features_set_idx++;
+        if (reprojection_features_set_idx > cfd_.reprojection_features.size()) {
+          reprojection_features_set_idx = 0;
+        }
         break;
       case 'g':
         use_ground_truth = !use_ground_truth && ground_truth_ != nullptr;
         break;
-/*       case 'n': */
-/*         next_frame = true; */
-/*         done = true; */
-/*         break; */
+      case 'n':
+        next_frame = true;
+        done = true;
+        break;
 /*       case 's': */
 /*         cv::imwrite("/tmp/left.png", p1_->undistortedImage(0)); */
 /*         break; */
