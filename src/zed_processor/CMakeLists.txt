@@ -38,7 +38,7 @@ find_package(catkin REQUIRED COMPONENTS
   cmake_modules
 )
 
-find_package(OpenCV ${OCV_VERSION} COMPONENTS 
+find_package(OpenCV ${OCV_VERSION} REQUIRED COMPONENTS 
   core 
   highgui 
   imgproc 
@@ -46,22 +46,23 @@ find_package(OpenCV ${OCV_VERSION} COMPONENTS
   xfeatures2d
   cudawarping
   cudafeatures2d
-  REQUIRED
-  PATHS /usr/local/opencv3/share/OpenCV)
+  PATHS /usr/local/opencv3/
+  NO_DEFAULT_PATH
+  )
 
 find_package(Ceres REQUIRED)
 
 find_package(CUDA ${CUDA_VERSION} REQUIRED)
 
 set(CUDA_NVCC_FLAGS 
-  -gencode arch=compute_20,code=sm_20 
   -gencode arch=compute_30,code=sm_32
+  -gencode arch=compute_50,code=sm_50
   -lineinfo 
   -std=c++11
   -O2
   -g)
 
-find_package(Eigen REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 find_package(Boost COMPONENTS program_options filesystem system)
 
