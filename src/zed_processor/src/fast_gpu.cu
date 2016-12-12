@@ -213,6 +213,7 @@ void FastGpu::computeScores(
       border_,
       scores_, 
       tmp_keypoints_);
+  cudaSafeCall(cudaGetLastError());
 }
 
 void FastGpu::downloadKpCount(cv::cuda::Stream& s) {
@@ -225,8 +226,11 @@ void FastGpu::extract(
     cv::cuda::Stream& s) {
   res.clear(s);
   auto cuda_stream = cv::cuda::StreamAccessor::getStream(s);
-  nonmax_supression<<<(*n_tmp_keypoints_ + 63)/64, 64, 0, cuda_stream>>>(
-      scores_, tmp_keypoints_, res);
+  if (*n_tmp_keypoints_ > 0) {
+    nonmax_supression<<<(*n_tmp_keypoints_ + 63)/64, 64, 0, cuda_stream>>>(
+        scores_, tmp_keypoints_, res);
+    cudaSafeCall(cudaGetLastError());
+  }
 }
 
 void FastGpu::detect(

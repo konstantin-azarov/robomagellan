@@ -22,28 +22,31 @@ FrameProcessor::FrameProcessor(
     const FrameProcessorConfig& config) : 
     calib_(&calib),
     freak_(config.descriptor_radius),
-    fast_l_(kMaxKeypoints*5, freak_.borderWidth()),
-    fast_r_(kMaxKeypoints*5, freak_.borderWidth()),
-    matcher_(kMaxKeypoints, kMaxKeypoints * 15),
-    matches_gpu_(kMaxKeypoints),
-    keypoints_gpu_l_(kMaxKeypoints),
-    keypoints_gpu_r_(kMaxKeypoints),
-    keypoint_pairs_gpu_(kMaxKeypoints * 15) {
+    fast_l_(config.max_unsuppressed_keypoints, freak_.borderWidth()),
+    fast_r_(config.max_unsuppressed_keypoints, freak_.borderWidth()),
+    threshold_(config.initial_threshold),
+    matcher_(config.max_keypoint_count, config.max_keypoint_pairs),
+    matches_gpu_(config.max_keypoint_count),
+    keypoints_gpu_l_(config.max_keypoint_count),
+    keypoints_gpu_r_(config.max_keypoint_count),
+    keypoint_pairs_gpu_(config.max_keypoint_pairs) {
 
-  keypoints_cpu_[0].reserve(kMaxKeypoints);
-  keypoints_cpu_[1].reserve(kMaxKeypoints);
+  keypoints_cpu_[0].reserve(config.max_keypoint_count);
+  keypoints_cpu_[1].reserve(config.max_keypoint_count);
 
-  descriptors_gpu_[0].create(kMaxKeypoints, FreakGpu::kDescriptorWidth);
-  descriptors_gpu_[1].create(kMaxKeypoints, FreakGpu::kDescriptorWidth);
+  descriptors_gpu_[0].create(
+      config.max_keypoint_count, FreakGpu::kDescriptorWidth);
+  descriptors_gpu_[1].create(
+      config.max_keypoint_count, FreakGpu::kDescriptorWidth);
 
-  keypoint_pairs_.reserve(kMaxKeypoints * 15);
+  keypoint_pairs_.reserve(config.max_keypoint_pairs);
 
   for (int i=0; i < 2; ++i) {
     undistort_map_x_[i].upload(calib_->undistort_maps[i].x);
     undistort_map_y_[i].upload(calib_->undistort_maps[i].y);
   }
 
-  matches_.reserve(kMaxKeypoints);
+  matches_.reserve(config.max_keypoint_count);
 
   cudaSafeCall(cudaHostAlloc(
         &keypoint_sizes_, 2*sizeof(int), cudaHostAllocDefault));
@@ -62,7 +65,6 @@ cv::cuda::Stream s;
 
 void FrameProcessor::process(
     const cv::Mat src[], 
-    int threshold,
     FrameData& frame_data,
     FrameDebugData* frame_debug_data) {
 
@@ -78,10 +80,8 @@ void FrameProcessor::process(
   cv::cuda::Event*  e = events_;
 
   for (int i=0; i < 2; ++i) {
-  /* auto t0 = std::chrono::high_resolution_clock::now(); */
-   src_img_[i].upload(src[i], s[i]);
+    src_img_[i].upload(src[i], s[i]);
 
-  /* auto t1 = std::chrono::high_resolution_clock::now(); */
     cv::cuda::remap(
         src_img_[i], 
         undistorted_image_gpu_[i], 
@@ -91,16 +91,9 @@ void FrameProcessor::process(
         cv::BORDER_CONSTANT,
         cv::Scalar(),
         s[i]);
-      
-  /* auto t2 = std::chrono::high_resolution_clock::now(); */
-    fast[i]->computeScores(undistorted_image_gpu_[i], threshold, s[i]);
-  /* auto t3 = std::chrono::high_resolution_clock::now(); */
-
-  /* std::cout << "Upload: " */
-  /*   << " t1 = " << duration_cast<milliseconds>(t1 - t0).count() */
-  /*   << " t2 = " << duration_cast<milliseconds>(t2 - t0).count() */
-  /*   << " t3 = " << duration_cast<milliseconds>(t3 - t0).count() */
-  /*   << std::endl; */
+     
+    fast[i]->computeScores(
+        undistorted_image_gpu_[i], threshold_[i], s[i]);
   }
 
   for (int i=0; i < 2; ++i) {
@@ -112,8 +105,9 @@ void FrameProcessor::process(
 
   for (int i=0; i < 2; ++i) {
     e[i].waitForCompletion();
-    fast[i]->extract(threshold, *keypoints_gpu[i], s[i]);
+    fast[i]->extract(threshold_[i], *keypoints_gpu[i], s[i]);
     keypoints_gpu[i]->download(keypoints_cpu_[i], keypoint_sizes_[i], s[i]);
+
     e[i].record(s[i]);
   }
  
@@ -130,11 +124,51 @@ void FrameProcessor::process(
     nvtxRangePushA("sort");
     keypoints_cpu_[i].resize(keypoint_sizes_[i]);
 
+    int nx = 5;
+    int ny = 3;
+    int bx = calib_->raw.size.width / nx;
+    int by = calib_->raw.size.height / ny;
+
+    // Bucket
+    sort(
+        keypoints_cpu_[i].begin(), keypoints_cpu_[i].end(), 
+        [bx,by,ny](const short3& a, const short3& b) -> bool {
+          int a_bucket = (a.x / bx) * ny + a.y / by;
+          int b_bucket = (b.x / bx) * ny + b.y / by;
+          return a_bucket != b_bucket ? a_bucket < b_bucket : a.z > b.z;
+        });
+
+    int prev_bucket = -1;
+    int to_take = 0;
+    int k = 0;
+    for (int j=0; j < keypoints_cpu_[i].size(); j++) {
+      const auto& p = keypoints_cpu_[i][j];
+      int bucket = (p.x / bx) * ny + p.y / by;
+      if (bucket != prev_bucket) {
+        to_take = 5000 / (nx * ny);
+        prev_bucket = bucket;
+      }
+      if (to_take > 0) {
+        to_take--;
+        keypoints_cpu_[i][k++] = p;
+      }
+    }
+
+    keypoints_cpu_[i].resize(k);
+
+    // Sort by line
     sort(
         keypoints_cpu_[i].begin(), keypoints_cpu_[i].end(), 
         [](const short3& a, const short3& b) -> bool {
           return a.y < b.y || (a.y == b.y && a.x < b.x);
         });
+
+    if (frame_debug_data != nullptr) {
+      frame_debug_data->keypoints[i].clear();
+      std::copy(
+          std::begin(keypoints_cpu_[i]), std::end(keypoints_cpu_[i]),
+          std::back_inserter(frame_debug_data->keypoints[i]));
+    }
 
     keypoints_gpu[i]->upload(keypoints_cpu_[i], s[i]);
     nvtxRangePop();
@@ -150,9 +184,19 @@ void FrameProcessor::process(
   }
 
   nvtxRangePushA("compute_pairs");
-  computeKpPairs_(keypoints_cpu_[0], keypoints_cpu_[1], keypoint_pairs_);
+  computeKpPairs_(
+      keypoints_cpu_[0], 
+      keypoints_cpu_[1], 
+      config_.max_keypoint_pairs,
+      keypoint_pairs_);
+
+  std::cout << "Pairs: " << keypoint_pairs_.size() << std::endl;
+
   nvtxRangePop();
   keypoint_pairs_gpu_.upload(keypoint_pairs_, s[2]);
+
+  updateThreshold_(threshold_[0], keypoint_sizes_[0]);
+  updateThreshold_(threshold_[1], keypoint_sizes_[1]);
 
   s[2].waitEvent(e[0]);
   s[2].waitEvent(e[1]);
@@ -180,7 +224,6 @@ void FrameProcessor::process(
   frame_data.points.resize(0);
   const auto& c = calib_->intrinsics;
   int k = 0;
-  std::cout << "XCXC " << c.dr << ", " << c.cx << ", " << c.cy << std::endl;
   for (int t = 0; t < matches_.size(); ++t) {
     int i = matches_[t].x;
     int j = matches_[t].y; 
@@ -239,10 +282,11 @@ void FrameProcessor::process(
 void FrameProcessor::computeKpPairs_(
     const PinnedVector<short3>& kps1,
     const PinnedVector<short3>& kps2,
+    int max_pairs,
     PinnedVector<ushort2>& keypoint_pairs) {
   keypoint_pairs.resize(0);
   int j0 = 0, j1 = 0;
-  for (int i = 0; i < kps1.size(); ++i) {
+  for (int i = 0; i < kps1.size() && keypoint_pairs.size() < max_pairs; ++i) {
     auto& pt1 = kps1[i];
 
     while (j0 < kps2.size() && kps2[j0].y < pt1.y - 2)
@@ -255,12 +299,28 @@ void FrameProcessor::computeKpPairs_(
       auto& pt2 = kps2[j];
       assert(fabs(pt1.y - pt2.y) <= 2);
 
-      double dx = pt1.x - pt2.x;
+      int dx = pt1.x - pt2.x;
 
-      if (dx > -100 && dx < 100) {
+      if (dx > -10 && dx < 100) {
         keypoint_pairs.push_back(make_ushort2(i, j));
+        if (keypoint_pairs.size() == max_pairs) {
+          break;
+        }
       }
     }
   }
+}
+
+void FrameProcessor::updateThreshold_( int& threshold, int kp_count) {
+
+  if (kp_count < 3000) threshold -= 10;
+  else if (kp_count < 4000) threshold -= 5;
+  else if (kp_count < 4500) threshold -= 1;
+  else if (kp_count > 7000) threshold += 10;
+  else if (kp_count > 6000) threshold += 5;
+  else if (kp_count > 5500) threshold += 1;
+
+  if (threshold > 200) threshold = 200;
+  else if (threshold < 10) threshold = 10;
 }
 

@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
   string video_file, direction_file, calib_file, mono_calib_file;
   string path_trace_file;
   int start;
-  bool debug;
+  int debug;
   std::string kitti_basedir, kitti_dataset;
   int frame_count;
 
@@ -98,8 +98,8 @@ int main(int argc, char** argv) {
        po::value<string>(&kitti_dataset),
        "Analyze a KITTI sequence")
       ("debug",
-       po::bool_switch(&debug)->default_value(false),
-       "Start in debug mode.");
+       po::value<int>(&debug)->default_value(0),
+       "Debug mode: 0 - none, 1 - failed frames, 2 - every frame");
  
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -151,11 +151,9 @@ int main(int argc, char** argv) {
   config.descriptor_radius = 40;
   FrameProcessor frame_processor(calib, config);
 
-  int threshold = 20;
-
   FrameData frame_data[2] = {
-    FrameData(kMaxKeypoints),
-    FrameData(kMaxKeypoints)
+    FrameData(config.max_keypoint_count),
+    FrameData(config.max_keypoint_count)
   };
 
   FrameDebugData frame_debug_data[2];
@@ -215,7 +213,7 @@ int main(int argc, char** argv) {
     FrameData& prev_frame = frame_data[prev_index];
 
     frame_processor.process(
-        mono_frames, threshold, cur_frame, 
+        mono_frames, cur_frame, 
         debug ? &frame_debug_data[cur_index] : nullptr);
 
     timer.mark("process");
@@ -227,10 +225,11 @@ int main(int argc, char** argv) {
       gt_d = (e::Translation3d(p.second) * p.first).inverse() * 
         e::Translation3d(g.second) * g.first;
     }
-  
+ 
+    bool ok = false;
     if (frame_index > 0) {
        e::Matrix3d t_cov;
-      bool ok = cross_processor.process(
+      ok = cross_processor.process(
           prev_frame, cur_frame, 
           /*have_valid_estimate*/ false, 
           d_r, d_t, 
@@ -246,6 +245,7 @@ int main(int argc, char** argv) {
           std::cout << "T_cov = " << t_cov << std::endl; 
           std::cout << "t = " << d_t << std::endl;
           have_valid_estimate = false;
+          ok = false;
         } else {
           cam_t += cam_r*d_t;
           cam_r = cam_r*d_r;
@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "Times: " << timer.str() << std::endl;
 
-    if (frame_index > 0 && debug) {
+    if (frame_index > 0 && (debug == 2 || (debug == 1 && !ok))) {
 
       DebugRenderer renderer(
           calib,

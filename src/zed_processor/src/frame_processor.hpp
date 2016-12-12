@@ -16,8 +16,6 @@
 
 struct StereoCalibrationData;
 
-const int kMaxKeypoints = 20000;
-
 struct StereoPoint {
   // World coordinates
   cv::Point3f world;
@@ -40,10 +38,28 @@ struct FrameData {
 
 struct FrameDebugData {
   cv::Mat undistorted_image[2];
+  std::vector<short3> keypoints[2]; 
 };
 
 struct FrameProcessorConfig {
+  int target_keypoint_count = 5000;
+  int max_keypoint_count = 10000;
+  int max_unsuppressed_keypoints = max_keypoint_count * 10;
+  int max_keypoint_pairs = max_keypoint_count * 20;
+
   float descriptor_radius = 64.980350;
+
+  int initial_threshold = 50;
+};
+
+template <class T>
+struct Stereo {
+  template <class ... Args>
+  Stereo(Args... args) : l(args...), r(args...) {}
+
+  T& operator[](int i) { return i == 0 ? l : r; }
+
+  T l, r;
 };
 
 class FrameProcessor {
@@ -58,7 +74,6 @@ class FrameProcessor {
     
     void process(
         const cv::Mat src[], 
-        int threshold,
         FrameData& frame_data,
         FrameDebugData* frame_debug_data);
 
@@ -66,10 +81,14 @@ class FrameProcessor {
     static void computeKpPairs_(
         const PinnedVector<short3>& kps1,
         const PinnedVector<short3>& kps2,
+        int max_pairs,
         PinnedVector<ushort2>& keypoint_pairs);
+
+    void updateThreshold_(int& threshold, int kp_count);
 
   private:
     const StereoCalibrationData* calib_;
+    const FrameProcessorConfig config_;
 
     FreakGpu freak_;
     FastGpu fast_l_, fast_r_;
@@ -78,6 +97,8 @@ class FrameProcessor {
     
     cv::cuda::Stream streams_[3];
     cv::cuda::Event events_[2];
+
+    Stereo<int> threshold_;
 
     cv::cuda::GpuMat undistort_map_x_[2], undistort_map_y_[2];
     cv::cudev::GpuMat_<uchar> src_img_[2], undistorted_image_gpu_[2];

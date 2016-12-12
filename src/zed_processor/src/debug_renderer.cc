@@ -62,9 +62,9 @@ bool DebugRenderer::loop() {
     if (stereo_mode) {
       renderStereo();
 
-/*       if (show_features) { */
-/*         renderFeatures(); */
-/*       } */
+      if (show_features) {
+        renderFeatures();
+      }
 
       if (show_matches) {
         renderMatches();
@@ -108,9 +108,9 @@ bool DebugRenderer::loop() {
 /*       case 't': */
 /*         stereo_mode = !stereo_mode; */
 /*         break; */
-/*       case 'f': */
-/*         show_features = !show_features; */
-/*         break; */
+      case 'f':
+        show_features = !show_features;
+        break;
       case 'm':
         show_matches = !show_matches;
         break;
@@ -126,7 +126,7 @@ bool DebugRenderer::loop() {
       case 'a':
         show_all_reprojection_features = !show_all_reprojection_features;
         break;
-      case 'f':
+      case 'r':
         reprojection_features_set_idx++;
         if (reprojection_features_set_idx > cfd_.reprojection_features.size()) {
           reprojection_features_set_idx = 0;
@@ -185,30 +185,30 @@ void DebugRenderer::renderStereo() {
 /*       target_img, img_(cv::Range(0, h_), cv::Range(w_, 2*w_))); */ 
 /* } */
 
-/* void DebugRenderer::renderFeatures() { */
-/*   int row = 0; */
+void DebugRenderer::renderFeatures() {
+  int row = 0;
 
-/*   for (auto* p : { p1_, p2_ }) { */
-/*     for (int t = 0; t < 2; ++t) { */
-/*       const auto& keypoints = p->keypoints(t); */
-/*       int n = keypoints.size(); */
+  for (auto& fd : { fd1_, fd2_ }) {
+    for (int t = 0; t < 2; ++t) {
+      const auto& keypoints = fd.keypoints[t];
+      int n = keypoints.size();
 
-/*       for (int i = 0; i < n; ++i) { */
-/*         const auto& pt = keypoints[i]; */
+      for (int i = 0; i < n; ++i) {
+        const auto& pt = keypoints[i];
 
-/*         cv::Point2f p(pt.x, pt.y); */
+        cv::Point2f p(pt.x, pt.y);
 
-/*         cv::circle( */
-/*             img_, */ 
-/*             p + cv::Point2f(w_*t, h_*row), */ 
-/*             3, */ 
-/*             cv::Scalar(0, 255, 0)); */
-/*       } */
-/*     } */
+        cv::circle(
+            img_, 
+            p + cv::Point2f(w_*t, h_*row), 
+            3, 
+            cv::Scalar(0, 255, 0));
+      }
+    }
 
-/*     row++; */
-/*   } */
-/* } */
+    row++;
+  }
+}
 
 void DebugRenderer::renderMatches() {
   int row = 0;

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 2.8.7)
 
 project(zed_processor)
 
+SET(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
+
 # if CMAKE_BUILD_TYPE is not specified, take 'Release' as default
 IF(NOT CMAKE_BUILD_TYPE)
     SET(CMAKE_BUILD_TYPE Release)
