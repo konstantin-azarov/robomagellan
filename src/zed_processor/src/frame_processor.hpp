@@ -39,6 +39,7 @@ struct FrameData {
 struct FrameDebugData {
   cv::Mat undistorted_image[2];
   std::vector<short3> keypoints[2]; 
+  int thresholds[2];
 };
 
 struct FrameProcessorConfig {

@@ -168,6 +168,8 @@ void FrameProcessor::process(
       std::copy(
           std::begin(keypoints_cpu_[i]), std::end(keypoints_cpu_[i]),
           std::back_inserter(frame_debug_data->keypoints[i]));
+
+      frame_debug_data->thresholds[i] = threshold_[i];
     }
 
     keypoints_gpu[i]->upload(keypoints_cpu_[i], s[i]);

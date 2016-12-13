@@ -57,8 +57,10 @@ bool CrossFrameProcessor::process(
   scores_right_gpu_.rowRange(0, n1).colRange(0, n2).download(
       scores_right_.rowRange(0, n1).colRange(0, n2));
 
-  match(p1, p2, scores_left_, scores_right_, n1, n2, matches_[0]);
-  match(p2, p1, scores_left_.t(), scores_right_.t(), n2, n1, matches_[1]);
+  match(p1, p2, scores_left_, n1, n2, matches_left_[0]);
+  match(p1, p2, scores_right_, n1, n2, matches_right_[0]);
+  match(p2, p1, scores_left_.t(), n2, n1, matches_left_[1]);
+  match(p2, p1, scores_right_.t(), n2, n1, matches_right_[1]);
 
   full_matches_.resize(0);
 
@@ -66,9 +68,11 @@ bool CrossFrameProcessor::process(
   float bucket_w = static_cast<float>(sz.width) / config_.x_buckets;
   float bucket_h = static_cast<float>(sz.height) / config_.y_buckets;
 
-  for (int i=0; i < matches_[0].size(); ++i) {
-    int j = matches_[0][i];
-    if (j != -1 && matches_[1][j] == i) {
+  for (int i=0; i < n1; ++i) {
+    int j = matches_left_[0][i];
+
+    if (j != -1 && matches_right_[0][i] == j && 
+        matches_left_[1][j] == i && matches_right_[1][j] == i) {
       const auto& kp = points2[j].left;
       int bucket = std::floor(kp.y / bucket_h) * config_.x_buckets + 
         std::floor(kp.x / bucket_w);
@@ -117,7 +121,8 @@ bool CrossFrameProcessor::process(
   auto t2 = std::chrono::high_resolution_clock::now();
 
   if (!use_initial_estimate) {
-    buildClique_(p1, p2);
+    buildCliqueNear_(p1, p2);
+    buildCliqueFar_(p1, p2);
   }
 
   auto t3 = std::chrono::high_resolution_clock::now();
@@ -145,8 +150,7 @@ bool CrossFrameProcessor::process(
 void CrossFrameProcessor::match(
     const FrameData& p1, 
     const FrameData& p2,
-    const cv::Mat_<ushort>& scores_left,
-    const cv::Mat_<ushort>& scores_right,
+    const cv::Mat_<ushort>& scores,
     int n1, int n2,
     std::vector<int>& matches) {
 
@@ -162,7 +166,7 @@ void CrossFrameProcessor::match(
         continue;
       }
 
-      double d = std::max(scores_left[i][j], scores_right[i][j]);
+      double d = scores[i][j];
 
       if (d < best_dist) {
         best_dist = d;
@@ -174,7 +178,7 @@ void CrossFrameProcessor::match(
   }
 }
 
-void CrossFrameProcessor::buildClique_(
+void CrossFrameProcessor::buildCliqueNear_(
     const FrameData& p1, 
     const FrameData& p2) {
   // Construct the matrix of the matches
@@ -186,8 +190,8 @@ void CrossFrameProcessor::buildClique_(
   clique_.reset(n);
 
   for (int i = 0; i < m; ++i) {
+    auto& m1 = full_matches_[filtered_matches_[i]];
     for (int j = 0; j < i; ++j) {
-      auto& m1 = full_matches_[filtered_matches_[i]];
       auto& m2 = full_matches_[filtered_matches_[j]];
       double l1 = sqrt(norm3(m1.p1 - m2.p1));
       double l2 = sqrt(norm3(m1.p2 - m2.p2));
@@ -206,6 +210,52 @@ void CrossFrameProcessor::buildClique_(
   const std::vector<int>& clique = clique_.compute();
 
   filtered_reprojection_features_.resize(0);
+  for (int i : clique) {
+    filtered_reprojection_features_.push_back(all_reprojection_features_[i]);
+  }
+}
+
+void CrossFrameProcessor::buildCliqueFar_(
+    const FrameData& p1, 
+    const FrameData& p2) {
+  // Construct the matrix of the matches
+  // matches i and j have an edge is distance between corresponding points in the
+  // first image is equal to the distance between corresponding points in the
+  // last image.
+  int n = full_matches_.size();
+  int m = filtered_matches_.size();
+  clique_.reset(n);
+
+  float dz = 0.1*60/3.6 * 2000;
+  int cx = calibration_.intrinsics.cx;
+  int cy = calibration_.intrinsics.cy;
+
+  auto is_far = [&](double z, cv::Point2d s) {
+    return z > dz * std::max(fabs(s.x - cx), fabs(s.y - cy));
+  };
+
+  for (int i = 0; i < m; ++i) {
+    auto& m1 = full_matches_[filtered_matches_[i]];
+    Eigen::Vector3d cp1 = 
+      Eigen::Vector3d(m1.p1.x, m1.p1.y, m1.p1.z).normalized().cross(
+        Eigen::Vector3d(m1.p2.x, m1.p2.y, m1.p2.z).normalized());
+
+    if (is_far(m1.p1.z, p1.points[m1.i1].left)) {
+      for (int j = 0; j < i; ++j) {
+        auto& m2 = full_matches_[filtered_matches_[j]];
+        Eigen::Vector3d cp2 = 
+          Eigen::Vector3d(m2.p1.x, m2.p1.y, m2.p1.z).normalized().cross(
+            Eigen::Vector3d(m2.p2.x, m2.p2.y, m2.p2.z).normalized());
+
+        if (fabs(cp1.norm() - cp2.norm()) < M_PI/180*5) {
+          clique_.addEdge(filtered_matches_[i], filtered_matches_[j]);
+        }
+      }
+    }
+  }
+
+  const std::vector<int>& clique = clique_.compute();
+  
   for (int i : clique) {
     filtered_reprojection_features_.push_back(all_reprojection_features_[i]);
   }
@@ -289,9 +339,13 @@ bool CrossFrameProcessor::estimatePose_(
 
   if (debug_data != nullptr) {
     debug_data->reprojection_features.clear();
+    debug_data->pose_estimations.clear();
   }
 
   double reprojection_error;
+
+  t.setZero();
+  r.setIdentity();
 
   for (int i=0; i < 10; ++ i) {
     if (i > 0 || !use_initial_estimate) {

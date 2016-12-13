@@ -128,8 +128,8 @@ bool StereoReprojectionEstimator::estimate(
     Eigen::Vector3d& t,
     Eigen::Matrix3d* t_cov) {
 
-  double q[4] = { 1, 0, 0, 0 };
-  double t_raw[3] = { 0, 0, 0 };
+  double q[4] = { r.w(), r.x(), r.y(), r.z() };
+  double t_raw[3] = { t.x(), t.y(), t.z() };
   std::vector<double*> allParameterBlocks = { q, t_raw };
 
   Problem problem;

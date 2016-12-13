@@ -149,6 +149,7 @@ int main(int argc, char** argv) {
 
   FrameProcessorConfig config;
   config.descriptor_radius = 40;
+  config.initial_threshold = 15;
   FrameProcessor frame_processor(calib, config);
 
   FrameData frame_data[2] = {
@@ -192,6 +193,8 @@ int main(int argc, char** argv) {
   e::Vector3d d_t;
   bool have_valid_estimate = false;
 
+  double speed = 60*0.1/3.6*1000;
+
   bool done = false;
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
     Timer timer;
@@ -233,17 +236,20 @@ int main(int argc, char** argv) {
           prev_frame, cur_frame, 
           /*have_valid_estimate*/ false, 
           d_r, d_t, 
-          &t_cov, &cross_frame_debug_data);
+          &t_cov, 
+          debug ? &cross_frame_debug_data : nullptr);
 
       have_valid_estimate = ok;
 
       timer.mark("cross");
 
       if (ok) {
-        if (!(t_cov(0, 0) < 20 && t_cov(1, 1) < 20 && t_cov(2, 2) < 20)) {
+        double e2 = t_cov.trace();
+        if (e2 > 0.02*0.02*speed*speed && e2 > 25) {
           std::cout << "FAIL";
           std::cout << "T_cov = " << t_cov << std::endl; 
           std::cout << "t = " << d_t << std::endl;
+          std::cout << "speed = " << speed << std::endl;
           have_valid_estimate = false;
           ok = false;
         } else {
@@ -251,6 +257,7 @@ int main(int argc, char** argv) {
           cam_r = cam_r*d_r;
           cam_r.normalize();
         }
+        speed = d_t.norm();
         
         auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI;
         std::cout << "yaw = " << ypr.x() 

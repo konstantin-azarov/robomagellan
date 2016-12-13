@@ -189,6 +189,9 @@ void DebugRenderer::renderFeatures() {
   int row = 0;
 
   for (auto& fd : { fd1_, fd2_ }) {
+    std::cout << "Thresholds = {" 
+      << fd1_.thresholds[0] << ", " << fd1_.thresholds[1] <<  "}" << std::endl;
+
     for (int t = 0; t < 2; ++t) {
       const auto& keypoints = fd.keypoints[t];
       int n = keypoints.size();

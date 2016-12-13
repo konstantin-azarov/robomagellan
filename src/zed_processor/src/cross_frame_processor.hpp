@@ -56,6 +56,58 @@ struct CrossFrameDebugData {
   std::vector<Eigen::Affine3d> pose_estimations;
 };
 
+template <class T>
+class Bucketizer {
+  public:
+    Bucketizer(std::vector<int> bucket_sizes) {
+      buckets_.resize(bucket_sizes.size());
+      for (int i=0; i < bucket_sizes.size(); ++i) {
+        buckets_[i].reserve(bucket_sizes[i]);
+      }
+    }
+  
+    void clear() {
+      for (auto& b : buckets_) {
+        b.resize(0);
+      }
+    }
+
+    template <class F>
+    void bucketize(const std::vector<T>& items, F classifier) {
+      for (const auto& i : items) {
+        int v = classifier(i);
+        if (v != -1) {
+          auto& b = buckets_[v];
+          if (b.size() < bucket_size_limit_[v]) {
+            b.push_back(i);
+          }
+        }
+      }
+    }
+
+    const std::vector<T>& bucket(int i) {
+      return buckets_[i];
+    }
+
+    template <class F>
+    void sortAll(F f) {
+      for (auto& b : buckets_) {
+        std::sort(std::begin(b), std::end(b), f);
+      }
+    }
+
+  private:
+    std::vector<int> bucket_size_limit_;
+    std::vector<std::vector<T> > buckets_;
+};
+
+struct WorldFeature {
+  Eigen::Vector3d w;
+  Eigen::Vector2i left, right;
+  int desc_l, desc_r;
+  int score;
+};
+
 class CrossFrameProcessor {
   public:
     CrossFrameProcessor(
@@ -74,12 +126,14 @@ class CrossFrameProcessor {
     void match(
         const FrameData& p1, 
         const FrameData& p2,
-        const cv::Mat_<ushort>& scores_left,
-        const cv::Mat_<ushort>& scores_right,
+        const cv::Mat_<ushort>& scores,
         int n1, int n2,
         std::vector<int>& matches);
 
-    void buildClique_(
+    void buildCliqueNear_(
+        const FrameData& p1, 
+        const FrameData& p2);
+    void buildCliqueFar_(
         const FrameData& p1, 
         const FrameData& p2);
 
@@ -119,7 +173,7 @@ class CrossFrameProcessor {
 
     // matches[0][i] - best match in the second frame for i-th feature in the first frame
     // matches[1][j] - best match in the first frame for j-th feature in the second frame
-    std::vector<int> matches_[2];
+    std::vector<int> matches_left_[2], matches_right_[2];
     // 3d point matches between frames
     std::vector<CrossFrameMatch> full_matches_;
     std::vector<int> filtered_matches_;
