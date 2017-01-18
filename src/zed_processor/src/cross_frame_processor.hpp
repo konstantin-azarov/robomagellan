@@ -3,6 +3,7 @@
 
 #include <Eigen/Geometry>
 
+#include <memory>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -12,30 +13,11 @@
 #include "reprojection_estimator.hpp"
 #include "rigid_estimator.hpp"
 
+#include "frame_processor.hpp"
+
 class StereoCalibrationData;
 
 class FrameData;
-
-struct CrossFrameMatch {
-  CrossFrameMatch() {}
-
-  CrossFrameMatch(
-      const cv::Point3d& p1_, 
-      const cv::Point3d& p2_, 
-      int bucket_index_,
-      float score_,
-      int i1_, 
-      int i2_) :
-    p1(p1_), p2(p2_), bucket_index(bucket_index_), score(score_), i1(i1_), i2(i2_) {
-  }
-
-  cv::Point3d p1, p2;
-  // Bucketing
-  int bucket_index;
-  float score;
-  // Index of the corresponding frame point
-  int i1, i2;
-};
 
 struct CrossFrameProcessorConfig {
   int match_radius = 100;
@@ -106,6 +88,8 @@ struct WorldFeature {
   Eigen::Vector2i left, right;
   int desc_l, desc_r;
   int score;
+  
+  WorldFeature *match;
 };
 
 class CrossFrameProcessor {
@@ -168,15 +152,20 @@ class CrossFrameProcessor {
 
     const StereoCalibrationData& calibration_;
 
-    cv::cudev::GpuMat_<ushort> scores_left_gpu_, scores_right_gpu_;
-    cv::Mat_<ushort> scores_left_, scores_right_;
+    Matcher matcher_;
 
-    // matches[0][i] - best match in the second frame for i-th feature in the first frame
-    // matches[1][j] - best match in the first frame for j-th feature in the second frame
-    std::vector<int> matches_left_[2], matches_right_[2];
-    // 3d point matches between frames
-    std::vector<CrossFrameMatch> full_matches_;
-    std::vector<int> filtered_matches_;
+    std::unique_ptr<Bucketizer<WorldFeature>> tracked_features_;
+    // Only one index, because descriptors are compacted in the end
+    std::vector<WorldFeature*> feature_index_;
+    std::unique_ptr<Stereo<DescriptorBuffer>>
+      tracked_descriptors_, back_desc_buffer_;
+
+    std::unique_ptr<Bucketizer<WorldFeature>> new_features_;
+    Stereo<std::vector<WorldFeature*>> new_feature_index_;
+
+    Stereo<std::vector<ushort2>> feature_pairs_;
+
+
     // Clique builder
     Clique clique_;
     // Reprojection features for full_matches_;

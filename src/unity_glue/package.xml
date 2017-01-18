@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package>
+  <name>unity_glue</name>
+  <version>0.1.0</version>
+  <description>Connector for the Unity3d-based simulator.</description>
+
+  <maintainer email="konstantin.azarov@gmail.com">Konstantin Azarov</maintainer>
+
+  <license>BSD</license>
+
+  <author email="konstantin.azarov@gmail.com">Konstantin Azarov</author>
+
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>rospy</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <run_depend>rospy</run_depend>
+  <run_depend>rostopic</run_depend>
+  <run_depend>std_msgs</run_depend>
+  <run_depend>trex_dmc01</run_depend>
+
+  <!-- The export tag contains other, unspecified, tags -->
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+
+  </export>
+</package>
