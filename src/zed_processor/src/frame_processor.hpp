@@ -21,7 +21,6 @@ struct StereoPoint {
   cv::Point3f world;
   // Keypoints (x, y, response)
   cv::Point2f left, right;
-  int left_i, right_i;
   int score;
 };
 

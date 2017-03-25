@@ -29,6 +29,8 @@ class BagVideoReader : public VideoReader {
 
     virtual bool nextFrame(cv::Mat& mat);
 
+    bool nextFrameRaw(cv::Mat& mat);
+
   private:
     rosbag::Bag bag_;
     rosbag::View view_;

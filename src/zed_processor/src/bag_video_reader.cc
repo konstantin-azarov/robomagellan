@@ -54,3 +54,22 @@ bool BagVideoReader::nextFrame(cv::Mat& mat) {
   }
 }
 
+bool BagVideoReader::nextFrameRaw(cv::Mat& mat) {
+  if (iterator_ == view_.end())
+    return false;
+
+  auto img = iterator_->instantiate<sensor_msgs::Image>();
+  cv::Mat img_mat(
+      img->height, 
+      img->width, 
+      CV_8UC3, 
+      img->data.data(), 
+      img->step);
+
+  img_mat.copyTo(mat);
+  
+  ++iterator_;
+
+  return true;
+}
+

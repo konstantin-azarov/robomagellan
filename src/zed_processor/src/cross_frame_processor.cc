@@ -15,121 +15,76 @@ CrossFrameProcessor::CrossFrameProcessor(
     const CrossFrameProcessorConfig& config) 
   : calibration_(calibration), 
     reprojection_estimator_(&calibration.intrinsics),
-    config_(config) {
-  scores_left_.create(4000, 4000);
-  scores_left_gpu_.create(4000, 4000);
-  scores_right_.create(4000, 4000);
-  scores_right_gpu_.create(4000, 4000);
+    config_(config),
+    matcher_(config_.maxTrackedFeatures(), config_.max_incoming_features) {
+
+/*   scores_left_.create(max_stored_features, config_.max_incoming_features); */
+/*   scores_left_gpu_.create(4000, 4000); */
+/*   scores_right_.create(4000, 4000); */
+/*   scores_right_gpu_.create(4000, 4000); */
 }
 
 bool CrossFrameProcessor::process(
-    const FrameData& p1, 
-    const FrameData& p2,
-    bool use_initial_estimate,
+    const FrameData& p, 
     Eigen::Quaterniond& r, 
     Eigen::Vector3d& t,
     Eigen::Matrix3d* t_cov,
     CrossFrameDebugData* debug_data) {
   auto t0 = std::chrono::high_resolution_clock::now();
 
-  const auto& points1 = p1.points;
-  const auto& points2 = p2.points;
+  const auto& points = p.points;
 
-  int n1 = points1.size();
-  int n2 = points2.size();
+  int n_f = tracked_features_.size();
+  int n_p = points.size();
 
   auto t1 = std::chrono::high_resolution_clock::now();
 
   descriptor_tools::scores(
-      p1.d_left.rowRange(0, n1), 
-      p2.d_left.rowRange(0, n2),
-      scores_left_gpu_,
+      tracked_descriptors_->l.rowRange(0, n_f),
+      p.d_left.rowRange(0, n_p),
+      scores_gpu_.l,
       cv::cuda::Stream::Null());
 
   descriptor_tools::scores(
-      p1.d_right.rowRange(0, n1), 
-      p2.d_right.rowRange(0, n2),
-      scores_right_gpu_,
+      tracked_descriptors_->r.rowRange(0, n_f),
+      p.d_right.rowRange(0, n_p), 
+      scores_gpu_.r,
       cv::cuda::Stream::Null());
 
-  scores_left_gpu_.rowRange(0, n1).colRange(0, n2).download(
-      scores_left_.rowRange(0, n1).colRange(0, n2));
-  scores_right_gpu_.rowRange(0, n1).colRange(0, n2).download(
-      scores_right_.rowRange(0, n1).colRange(0, n2));
+  scores_gpu_.l(cv::Range(0, n_f), cv::Range(0, n_p)).download(
+      scores_cpu_.l(cv::Range(0, n_f), cv::Range(0, n_p)));
+  scores_gpu_.r(cv::Range(0, n_f), cv::Range(0, n_p)).download(
+      scores_cpu_.r(cv::Range(0, n_f), cv::Range(0, n_p)));
 
-  match(p1, p2, scores_left_, n1, n2, matches_left_[0]);
-  match(p1, p2, scores_right_, n1, n2, matches_right_[0]);
-  match(p2, p1, scores_left_.t(), n2, n1, matches_left_[1]);
-  match(p2, p1, scores_right_.t(), n2, n1, matches_right_[1]);
+  matchStereo_();
 
-  full_matches_.resize(0);
+  features_with_matches_.resize(0);
 
-  auto sz = calibration_.raw.size;
-  float bucket_w = static_cast<float>(sz.width) / config_.x_buckets;
-  float bucket_h = static_cast<float>(sz.height) / config_.y_buckets;
-
-  for (int i=0; i < n1; ++i) {
-    int j = matches_left_[0][i];
-
-    if (j != -1 && matches_right_[0][i] == j && 
-        matches_left_[1][j] == i && matches_right_[1][j] == i) {
-      const auto& kp = points2[j].left;
-      int bucket = std::floor(kp.y / bucket_h) * config_.x_buckets + 
-        std::floor(kp.x / bucket_w);
-      float score = points1[i].score + points2[j].score;
-      full_matches_.push_back(
-          CrossFrameMatch(
-            points1[i].world, points2[j].world, bucket, score, i, j));
+  for (auto& f : tracked_features_) {
+    if (f.match != nullptr) {
+      features_with_matches_.push_back(&f);
+      if (isNear(f)) {
+        near_features_.push_back(&f);
+      } else if (isFar(f)) {
+        far_features_.push_back(&f);
+      }
     }
   }
 
-  // Bucketing
-  
-  std::sort(
-      full_matches_.begin(), full_matches_.end(), 
-      [](const CrossFrameMatch& a, const CrossFrameMatch& b) {
-        if (a.bucket_index != b.bucket_index) {
-          return a.bucket_index < b.bucket_index;
-        }
-        return a.score > b.score;
-      });
-
-  int current_bucket = -1;
-  int current_cnt = 0;
-  int i = 0;
-  filtered_matches_.resize(0);
-  for (const auto& m : full_matches_) {
-    if (m.bucket_index != current_bucket) {
-      current_cnt = 0;
-      current_bucket = m.bucket_index;
-    }
-    if (current_cnt < config_.max_features_per_bucket) {
-      filtered_matches_.push_back(i);
-      ++current_cnt;
-    }
-    ++i;
-  }
-  
+  pickInitialFeatures_();
+ 
   fillReprojectionFeatures_(p1, p2);
 
   if (debug_data != nullptr) {
     debug_data->all_reprojection_features = all_reprojection_features_;
   }
 
-  // --
 
-  auto t2 = std::chrono::high_resolution_clock::now();
-
-  if (!use_initial_estimate) {
-    buildCliqueNear_(p1, p2);
-    buildCliqueFar_(p1, p2);
-  }
-
-  auto t3 = std::chrono::high_resolution_clock::now();
-
-  if (!estimatePose_(use_initial_estimate, r, t, t_cov, debug_data)) {
+  if (!estimatePose_(r, t, t_cov, debug_data)) {
     return false;
   }
+
+  updateFeatures_();
 
   auto t4 = std::chrono::high_resolution_clock::now();
   
@@ -147,29 +102,36 @@ bool CrossFrameProcessor::process(
   return true;
 }
 
-void CrossFrameProcessor::match(
-    const FrameData& p1, 
-    const FrameData& p2,
-    const cv::Mat_<ushort>& scores,
-    int n1, int n2,
+void CrossFrameProcessor::matchStereo_() {
+  matchMono_(scores_cpu_.l, matches_.l);
+  matchMono_(scores_cpu_.r, matches_.r);
+
+  int n = tracked_features_.size();
+
+  for (int i = 0; i < n; ++i) {
+    if (matches_.l[i] == matches_.r[i]) {
+      tracked_features[i].match = &new_features[matches_.l[i]];
+      new_features[matches_.l[i]].match = &tracked_features[i];
+    }
+  }
+}
+
+void CrossFrameProcessor::matchMono_(
+    const cv::Mat_<uint16_t>& scores,
     std::vector<int>& matches) {
 
-  matches.resize(n1);
+  int n = scores.rows;
+  int m = scores.cols;
 
-  for (int i = 0; i < n1; ++i) {
+  matches.resize(n);
+  std::fill(std::begin(matches), std::end(matches), -1);
+
+  for (int i = 0; i < n; ++i) {
+    int best_v = 1024;
     int best_j = -1;
-    double best_dist = 1E+15;
-
-    for (int j = 0; j < n2; ++j) {
-      double screen_d = cv::norm(p1.points[i].left - p2.points[j].left);
-      if (screen_d > config_.match_radius) {
-        continue;
-      }
-
-      double d = scores[i][j];
-
-      if (d < best_dist) {
-        best_dist = d;
+    for (int j = 0; j < m; ++j) {
+      if (scores(i, j) < best_v) {
+        best_v = scores(i, j);
         best_j = j;
       }
     }

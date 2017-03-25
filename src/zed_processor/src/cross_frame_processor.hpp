@@ -9,6 +9,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
+#include "bucketizer.hpp"
 #include "clique.hpp"
 #include "reprojection_estimator.hpp"
 #include "rigid_estimator.hpp"
@@ -22,10 +23,15 @@ class FrameData;
 struct CrossFrameProcessorConfig {
   int match_radius = 100;
   int x_buckets = 10, y_buckets = 10;
-  int max_features_per_bucket = 5;
+  int max_tracked_features_per_bucket = 20;
+  int max_incoming_features = 4000;
   int min_features_for_estimation = 5;
   double max_reprojection_error = 2.0;
   double inlier_threshold = 3.0;
+
+  int maxTrackedFeatures() const {
+    return max_tracked_features_per_bucket * x_buckets * y_buckets;
+  }
 };
 
 struct ReprojectionFeatureWithError : public StereoReprojectionFeature {
@@ -38,58 +44,12 @@ struct CrossFrameDebugData {
   std::vector<Eigen::Affine3d> pose_estimations;
 };
 
-template <class T>
-class Bucketizer {
-  public:
-    Bucketizer(std::vector<int> bucket_sizes) {
-      buckets_.resize(bucket_sizes.size());
-      for (int i=0; i < bucket_sizes.size(); ++i) {
-        buckets_[i].reserve(bucket_sizes[i]);
-      }
-    }
-  
-    void clear() {
-      for (auto& b : buckets_) {
-        b.resize(0);
-      }
-    }
-
-    template <class F>
-    void bucketize(const std::vector<T>& items, F classifier) {
-      for (const auto& i : items) {
-        int v = classifier(i);
-        if (v != -1) {
-          auto& b = buckets_[v];
-          if (b.size() < bucket_size_limit_[v]) {
-            b.push_back(i);
-          }
-        }
-      }
-    }
-
-    const std::vector<T>& bucket(int i) {
-      return buckets_[i];
-    }
-
-    template <class F>
-    void sortAll(F f) {
-      for (auto& b : buckets_) {
-        std::sort(std::begin(b), std::end(b), f);
-      }
-    }
-
-  private:
-    std::vector<int> bucket_size_limit_;
-    std::vector<std::vector<T> > buckets_;
-};
-
 struct WorldFeature {
   Eigen::Vector3d w;
   Eigen::Vector2i left, right;
   int desc_l, desc_r;
-  int score;
-  
-  WorldFeature *match;
+  int score, age;
+  WorldFeature* match;
 };
 
 class CrossFrameProcessor {
@@ -99,24 +59,28 @@ class CrossFrameProcessor {
         const CrossFrameProcessorConfig& config);
     
     bool process(
-        const FrameData& p1, const FrameData& p2,
-        bool use_initial_estimate,
+        const FrameData& p,
         Eigen::Quaterniond& r, 
         Eigen::Vector3d& t,
         Eigen::Matrix3d* t_cov,
         CrossFrameDebugData* debug_data);
    
   private:
-    void match(
-        const FrameData& p1, 
-        const FrameData& p2,
-        const cv::Mat_<ushort>& scores,
-        int n1, int n2,
+    void matchStereo_();
+
+    void matchMono_(
+        const cv::Mat_<uint16_t>& scores,
         std::vector<int>& matches);
+
+    bool isNear(const WorldFeature& f) const;
+    bool isFar(const WorldFeature& f) const;
+
+    void pickInitialFeatures_();
 
     void buildCliqueNear_(
         const FrameData& p1, 
         const FrameData& p2);
+
     void buildCliqueFar_(
         const FrameData& p1, 
         const FrameData& p2);
@@ -154,19 +118,24 @@ class CrossFrameProcessor {
 
     Matcher matcher_;
 
-    std::unique_ptr<Bucketizer<WorldFeature>> tracked_features_;
-    // Only one index, because descriptors are compacted in the end
-    std::vector<WorldFeature*> feature_index_;
-    std::unique_ptr<Stereo<DescriptorBuffer>>
+    std::vector<WorldFeature> tracked_features_;
+    std::unique_ptr<Stereo<cv::cudev::GpuMat_<uint8_t>>>
       tracked_descriptors_, back_desc_buffer_;
 
-    std::unique_ptr<Bucketizer<WorldFeature>> new_features_;
-    Stereo<std::vector<WorldFeature*>> new_feature_index_;
+    std::vector<WorldFeature*> features_with_matches_;
+    std::vector<WorldFeature*> near_features_, far_features_;
 
-    Stereo<std::vector<ushort2>> feature_pairs_;
+    std::vector<WorldFeature*> estimation_features_;
 
+    std::vector<WorldFeature> new_features_;
 
-    // Clique builder
+    Stereo<cv::cudev::GpuMat_<uint16_t>> scores_gpu_;
+    Stereo<cv::Mat_<uint16_t>> scores_cpu_;
+
+    // Match from a tracked point to a new point
+    Stereo<std::vector<int> > matches_;
+
+     // Clique builder
     Clique clique_;
     // Reprojection features for full_matches_;
     std::vector<ReprojectionFeatureWithError> all_reprojection_features_;

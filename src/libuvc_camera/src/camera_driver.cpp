@@ -331,6 +331,8 @@ void CameraDriver::OpenCamera(UVCCameraConfig &new_config) {
     return;
   }
 
+  ROS_INFO("FOUND Something");
+
   // select device by index
   dev_ = NULL;
   int dev_idx = 0;
@@ -349,6 +351,8 @@ void CameraDriver::OpenCamera(UVCCameraConfig &new_config) {
     ROS_ERROR("Unable to find device at index %d", new_config.index);
     return;
   }
+
+  ROS_INFO("Opening");
 
   uvc_error_t open_err = uvc_open(dev_, &devh_);
 
@@ -380,7 +384,16 @@ void CameraDriver::OpenCamera(UVCCameraConfig &new_config) {
     return;
   }
 
+  ROS_INFO("Opened");
+
   uvc_set_status_callback(devh_, &CameraDriver::AutoControlsCallbackAdapter, this);
+
+  ROS_INFO("Set callback");
+
+  ROS_INFO("Finding video mode: %d %d", GetVideoMode(new_config.video_mode),
+      UVC_COLOR_FORMAT_YUYV);
+  ROS_INFO("Finding stream: %d %d %f", 
+      new_config.width, new_config.height, new_config.frame_rate);
 
   uvc_stream_ctrl_t ctrl;
   uvc_error_t mode_err = uvc_get_stream_ctrl_format_size(
@@ -397,6 +410,9 @@ void CameraDriver::OpenCamera(UVCCameraConfig &new_config) {
     uvc_print_diag(devh_, NULL);
     return;
   }
+
+  ROS_INFO("Found stream: %d %d %d", 
+      new_config.width, new_config.height, new_config.frame_rate);
 
   uvc_error_t stream_err = uvc_start_streaming(devh_, &ctrl, &CameraDriver::ImageCallbackAdapter, this, 0);
 

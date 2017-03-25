@@ -80,6 +80,6 @@ if __name__ == '__main__':
     unity_client.connect()
 
     rospy.on_shutdown(sigint_handler)
-    rospy.Subscriber("/set_motors", SetMotors, set_motors_callback)
+    rospy.Subscriber("motors", SetMotors, set_motors_callback)
     print "Ready"
     rospy.spin()

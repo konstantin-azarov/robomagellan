@@ -239,9 +239,7 @@ void FrameProcessor::process(
       p.world.x = (kp_l.x - c.cx) * p.world.z / c.f;
       p.world.y = ((kp_l.y + kp_r.y)/2.0 - c.cy) * p.world.z / c.f;
       p.left = cv::Point2f(kp_l.x, kp_l.y);
-      p.left_i = i;
       p.right = cv::Point2f(kp_r.x, kp_r.y);
-      p.right_i = j;
       p.score = kp_l.z + kp_r.z;
       frame_data.points.push_back(p);
     }
