@@ -38,6 +38,7 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   tf2_ros
   cmake_modules
+  trex_dmc01
 )
 
 find_package(OpenCV ${OCV_VERSION} REQUIRED COMPONENTS 
@@ -277,6 +278,8 @@ add_executable(
   src/process_race.cc
   src/bag_video_reader.cc
   src/calibration_data.cc
+  src/camera.cc
+  src/frame_buffer_queue.cc
   src/utils.cc
 )
 
@@ -288,8 +291,11 @@ target_link_libraries(
   ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY} nvToolsExt
   ${OpenCV_LIBS}
   ${Boost_LIBRARIES}
+  ${libuvc_LIBRARIES}
   ${EIGEN_LIBRARIES}
 )
+
+add_dependencies(process_race trex_dmc01_generate_messages_cpp)
 
 #add_executable(
 #  process_viso

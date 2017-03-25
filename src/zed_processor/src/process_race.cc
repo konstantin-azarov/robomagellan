@@ -7,10 +7,16 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include "ros/ros.h"
+#include "geometry_msgs/Twist.h"
+#include "trex_dmc01/Status.h"
+#include "trex_dmc01/SetMotors.h"
+
 #define BACKWARD_HAS_DW 1
 #include "backward.hpp"
 
 #include "bag_video_reader.hpp"
+#include "camera.hpp"
 #include "calibration_data.hpp"
 
 namespace c = std::chrono;
@@ -18,6 +24,8 @@ namespace po = boost::program_options;
 namespace e = Eigen;
 
 backward::SignalHandling sh;
+
+const int kFps = 30;
 
 const double kWorkingScale =  0.5; 
 const int kSegmentLengthThreshold = 3;
@@ -43,20 +51,23 @@ const double kLaneFoldInDistance = 50;
 const double kLaneMinContinuationCosine = cos(20 * M_PI / 180.0); 
 const int kLaneMinPoints = 15;
 
+const double kLaneExtensionBase = 300;
+const double kLaneExtensionLength = 10E+3;
+
 const double kInitialWidthEstimate = 2E+3;
 
-const double kMaxSpeed = 5 / 3.6;
+const double kMaxSpeed = 5E+3 / 3.6;
 const int kSpeedSteps = 4;
 const double kMaxTurnRate = 30 * M_PI / 180;
 const double kTurnRateSteps = 10;
 
 const double kTrackDistance = 5E+3;
-
-const int kTrackPoints = 20;
+const int kTrackPoints = 21;
 const double kTrackTimeStep = kTrackDistance / kMaxSpeed / (kTrackPoints-1);
 const double kTrackTailLength = 10E+3;
 
 const double kBestClearTime = 5.0;
+
 
 StereoIntrinsics scaleIntrinsics(StereoCalibrationData calib, double scale) {
   StereoIntrinsics res;
@@ -286,7 +297,7 @@ void extractLanes(const std::vector<e::Vector2d>& points,
   for (int i=0; i < lanes.size(); ++i) {
     const auto& lane = lanes[i];
     if (lane.size() > kLaneMinPoints) {
-      double s = lane[0].x() * lane.back().y() - lane[0].y() * lane.back().x();
+      double s = lane[0].x();
 
       if (s < 0 && lane[0].x() > best_left_x) {
         best_left_x = lane[0].x();
@@ -410,13 +421,10 @@ struct Command {
 void discretizeTrack(
     double v, double w, double dt, int n, double tail_length,
     e::Vector2d* res) {
-  double r = v/w;
-
   res[0] = e::Vector2d(0, 0);
 
   for (int i=1; i < n; ++i) {
-    double t = dt*i;
-    res[i] = e::Vector2d(r*(1 - cos(w*t)), r*sin(w*t));
+    res[i] = res[i-1] + e::Vector2d(sin(w*(i-1)*dt), cos(w*(i-1)*dt))*v*dt;
   }
   res[n] = res[n-1] + e::Vector2d(sin(w*(n-1)*dt), cos(w*(n-1)*dt))*tail_length;
 }
@@ -473,7 +481,7 @@ void updateSteeringCommand(
           kMaxSpeed * k_v / kSpeedSteps, 
           kMaxTurnRate * k_w / kTurnRateSteps);
 
-      std::cout << "CMD: v=" << cmd.v << ", w=" << cmd.w << ": " << cmd.clear_time << std::endl; 
+//      std::cout << "CMD: v=" << cmd.v << ", w=" << cmd.w << ": " << cmd.clear_time << std::endl; 
 
       if (cmd.clear_time > best_command.clear_time ||
           (cmd.clear_time > kBestClearTime && best_command.clear_time >= kBestClearTime &&
@@ -487,6 +495,19 @@ void updateSteeringCommand(
     v_cmd = best_command.v;
     w_cmd = best_command.w;
   }
+}
+
+void extendLane(std::vector<e::Vector2d>& lane, double base, double length) {
+  double dist = 0;
+  int i = lane.size() - 1;
+  e::Vector2d d(0, 0);
+  while (dist < base && i > 0) {
+    d += lane[i] - lane[i-1];
+    i--;
+    dist += (lane[i] - lane[i-1]).norm();
+  }
+
+  lane.push_back(lane.back() + d.normalized()*length); 
 }
 
 bool enhanceLanes(
@@ -511,6 +532,12 @@ bool enhanceLanes(
     width_estimate = estimateTrackWidth(left, right, width_estimate);
   }
 
+  left.insert(left.begin(), e::Vector2d(left.front().x(), 0));
+  right.insert(right.begin(), e::Vector2d(right.front().x(), 0));
+
+  extendLane(left, kLaneExtensionBase, kLaneExtensionLength);
+  extendLane(right, kLaneExtensionBase, kLaneExtensionLength);
+
   return true;
 }
 
@@ -524,7 +551,7 @@ void testIntersect() {
   cv::line(dbg_image, cv::Point(p1.x()*10, p1.y()*10), cv::Point(p2.x()*10, p2.y()*10), cv::Scalar(0, 0, 255));
   cv::line(dbg_image, cv::Point(q1.x()*10, q1.y()*10), cv::Point(q2.x()*10, q2.y()*10), cv::Scalar(0, 255, 0));
 
-  std::cout << intersectSegments(p1, p2, q1, q2, t1, t2) << std::endl;
+//  std::cout << intersectSegments(p1, p2, q1, q2, t1, t2) << std::endl;
 
   auto r1 = p1 + (p2 - p1)*t1;
   auto r2 = q1 + (q2 - q1)*t2;
@@ -534,14 +561,22 @@ void testIntersect() {
 
 
 
-  std::cout << t1 << " " << t2 << std::endl;
+//  std::cout << t1 << " " << t2 << std::endl;
 
   cv::imshow("debug", dbg_image);
   cv::waitKey(0);
 }
 
+bool g_control_active = false;
+
+void receiveTrexStatus(const trex_dmc01::Status::ConstPtr& msg) {
+  g_control_active = msg->state == trex_dmc01::Status::STATE_SERIAL &&
+    msg->channels[0] > 50;
+}
+
 int main(int argc, char** argv) {
   std::string video_file, calib_file;
+  bool debug_output;
 
   po::options_description desc("Command line options");
   desc.add_options()
@@ -550,7 +585,10 @@ int main(int argc, char** argv) {
        "path to the video file")
       ("calib-file",
        po::value<std::string>(&calib_file),
-       "path to the calibration file");
+       "path to the calibration file")
+      ("debug-output",
+       po::bool_switch(&debug_output),
+       "show debug graphics");
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -561,7 +599,19 @@ int main(int argc, char** argv) {
 
   StereoIntrinsics scaled_intrinsics = scaleIntrinsics(calib, kWorkingScale);
 
-  BagVideoReader rdr(video_file, "/image_raw");
+  std::unique_ptr<BagVideoReader> rdr;
+  std::unique_ptr<Camera> camera;
+
+  if (!video_file.empty()) {
+    rdr.reset(new BagVideoReader(video_file, "/image_raw"));
+  } else {
+    camera.reset(new Camera());
+    if (!camera->init(raw_calib.size.width*2, raw_calib.size.height, kFps)) {
+      ROS_ERROR("Failed to initialize camera");
+      return 1;
+    }
+  }
+
 
 //  rdr.skip(100);
 
@@ -572,7 +622,8 @@ int main(int argc, char** argv) {
   int frame_width = calib.raw.size.width;
   int frame_height = calib.raw.size.height;
 
-  cv::Mat raw_frame_mat, rectified_mat;
+  cv::Mat camera_frame_mat, raw_frame_mat, rectified_mat;
+  camera_frame_mat.create(frame_height, frame_width*2, CV_8UC2);
   raw_frame_mat.create(frame_height, frame_width*2, CV_8UC3);
   rectified_mat.create(frame_height, frame_width*2, CV_8UC3);
 
@@ -582,25 +633,44 @@ int main(int argc, char** argv) {
   std::vector<e::Vector2d> left_lane, right_lane;
   double width_estimate = kInitialWidthEstimate;
 
-  int img_mode = 0, frame_by_frame_mode = true;
+  int img_mode = 0, frame_by_frame_mode = rdr != nullptr;
  
   int working_width = frame_width * kWorkingScale;
   int working_height = frame_height * kWorkingScale; 
 
-  cv::namedWindow("debug");
-  cv::moveWindow("debug", 0, 0);
-  cv::namedWindow("map");
-  cv::moveWindow("map", 1000, working_height + 50);
+  if (debug_output) {
+    cv::namedWindow("debug");
+    cv::moveWindow("debug", 0, 0);
+    cv::namedWindow("map");
+    cv::moveWindow("map", 1000, working_height + 50);
+  }
 
   int failed_frames = 0;
     
   double v_cmd = 0, w_cmd = 0;
 
+  ros::init(argc, argv, "race_controller");
+  ros::NodeHandle ros_node;
+  ros::AsyncSpinner spinner(1);
+
+  auto trex_status_sub = ros_node.subscribe(
+      "trex_dmc01/status", 10, &receiveTrexStatus);
+
+  auto command_publisher = ros_node.advertise<geometry_msgs::Twist>(
+      "control", 10);
+
+  spinner.start();
+
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
+    bool fail = false;
+
     frame_index++;
 
-    if (!rdr.nextFrameRaw(raw_frame_mat)) {
+    if (rdr && !rdr->nextFrameRaw(raw_frame_mat)) {
       break;
+    } else if (camera) {
+      camera->nextFrame(camera_frame_mat.data);
+      cv::cvtColor(camera_frame_mat, raw_frame_mat, CV_YUV2RGB_YVYU);
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -632,24 +702,22 @@ int main(int argc, char** argv) {
     e::Vector4d plane;
       
     if (!extractGroundPlane(candidate_points, plane)) {
-      failed_frames++;
-      continue;
+      fail = true;
+    } else {
+      projectPoints(candidate_points, plane, projected_points); 
+      extractLanes(projected_points, left_lane, right_lane);
+
+      if (!enhanceLanes(left_lane, right_lane, width_estimate)) {
+        fail = true;
+      } else {
+        updateSteeringCommand(left_lane, right_lane, v_cmd, w_cmd);
+      }
     }
 
-    projectPoints(candidate_points, plane, projected_points); 
-    extractLanes(projected_points, left_lane, right_lane);
-
-    if (left_lane.empty() && right_lane.empty()) {
+    if (fail) {
       failed_frames++;
-      continue;
     }
-    
-    if (!enhanceLanes(left_lane, right_lane, width_estimate)) {
-      failed_frames++;
-      continue;
-    }
-
-    updateSteeringCommand(left_lane, right_lane, v_cmd, w_cmd);
+   
     
     auto t2 = c::high_resolution_clock::now();
 
@@ -660,7 +728,21 @@ int main(int argc, char** argv) {
     /*   << plane.w() << ")" << std::endl; */
     /* std::cout << "Angle = " << acos(-plane.y()) * 180/M_PI << std::endl; */
 
-    bool done_debug = false, print_points = false;
+    geometry_msgs::Twist msg;
+
+    if (g_control_active) {
+      msg.linear.z = v_cmd / 1000;
+      msg.angular.y = w_cmd;
+    } else {
+      msg.linear.z = 0;
+      msg.angular.y = 0;
+    }
+
+    command_publisher.publish(msg);
+
+    bool done_debug = !debug_output, print_points = false;
+
+//    std::cout << "Command: " << v_cmd << " " << w_cmd << std::endl;
 
     while (!done_debug) {
       done_debug = true;
@@ -740,6 +822,11 @@ int main(int argc, char** argv) {
             cv::Point(cx + p.x()*s, cy - p.y()*s), 
             cv::Point(cx + c.x()*s, cy - c.y()*s),
             cv::Scalar(0, 255, 255));
+      }
+
+      if (g_control_active) {
+        cv::putText(map_img, "LIVE", cv::Point(0, kMapHeight), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255));
+              
       }
           
       cv::imshow("debug", debug_image);
