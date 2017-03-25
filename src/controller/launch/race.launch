@@ -1,0 +1,15 @@
+<launch>
+  <node pkg="controller" 
+        name="controller" 
+        type="controller"
+        output="screen">
+    <remap from="motors" to="trex_dmc01/motors_command"/>
+  </node>
+
+  <node pkg="trex_dmc01"
+        name="trex_dmc01"
+        type="trex_dmc01"
+        output="screen">
+    <param name="serial_port" value="/dev/ttyUSB0"/>
+  </node>
+</launch>

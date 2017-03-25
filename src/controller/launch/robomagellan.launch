@@ -1,0 +1,11 @@
+<launch>
+  <node pkg="controller" 
+        name="controller" 
+        type="controller"
+        output="screen"/>
+  <node pkg="unity_glue" 
+        name="unity_glue" 
+        type="unity_glue.py"
+        respawn="true"
+        respawn_delay="10"/>
+</launch>
