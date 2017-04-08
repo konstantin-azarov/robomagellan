@@ -48,6 +48,30 @@ namespace descriptor_tools {
    cudaSafeCall(cudaGetLastError());
   }
 
+  __global__ void gatherGpuPtrs(
+      CudaDeviceVector<const uint8_t*>::Dev ptrs, 
+      cv::cudev::GlobPtr<uchar> out) {
+
+    int idx = kCopiesPerBlock * blockIdx.x + threadIdx.y;
+    int tid = threadIdx.x;
+
+    if (idx < ptrs.size()) {
+      const ushort* src = reinterpret_cast<const ushort*>(ptrs[idx]);
+      reinterpret_cast<ushort*>(out.row(idx))[tid] = src[tid];
+    }
+  }
+
+  void gatherDescriptors(
+      const CudaDeviceVector<const uint8_t*>& descs,
+      int n,
+      cv::cudev::GpuMat_<uint8_t>& d_compact,
+      cv::cuda::Stream& stream) {
+    auto s = cv::cuda::StreamAccessor::getStream(stream);
+    dim3 blockDim(32, kCopiesPerBlock);
+    gatherGpuPtrs<<<divUp(n, kCopiesPerBlock), blockDim, 0, s>>>(
+        descs, d_compact);
+  }
+
   const int kDescsPerBlock = 8;
   const int kThreadsPerPair = 4;
 

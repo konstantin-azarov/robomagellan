@@ -48,6 +48,43 @@ TEST(DescriptorTools, compact) {
   }
 }
 
+TEST(DescriptorTools, gatherPtrs) {
+  const int n = 5;
+  cv::Mat_<uint8_t> descs(n, 64);
+
+  for (int i = 0; i < n; ++i) {
+    for (int j=0; j < 64; ++j) {
+      descs(i, j) = i*64 + j;
+    }
+  }
+
+  cv::cudev::GpuMat_<uint8_t> descs_gpu(descs);
+
+  std::vector<int> idxs = { 0, 3, 2, 1, 4 };
+  std::vector<const uint8_t*> ptrs;
+  for (int i : idxs) {
+    ptrs.push_back(descs_gpu[i]);
+  }
+
+  cv::cudev::GpuMat_<uint8_t> descs_gathered_gpu(ptrs.size(), 64);
+  CudaDeviceVector<const uint8_t*> ptrs_gpu(ptrs.size());
+  ptrs_gpu.upload(ptrs);
+
+  descriptor_tools::gatherDescriptors(
+      ptrs_gpu, ptrs.size(), descs_gathered_gpu,
+      cv::cuda::Stream::Null());
+
+  cv::Mat_<uint8_t> descs_gathered;
+  descs_gathered_gpu.download(descs_gathered);
+
+
+  for (int i = 0; i < ptrs.size(); ++i) {
+    for (int j = 0; j < 64; ++j) {
+      ASSERT_EQ(descs(idxs[i], j), descs_gathered(i, j));
+    }
+  }
+}
+
 cv::Mat_<uchar> randomDescriptors(int n) {
   cv::Mat_<uchar> res(n, 64);
 

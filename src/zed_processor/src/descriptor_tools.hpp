@@ -15,6 +15,12 @@ namespace descriptor_tools {
     cv::cudev::GpuMat_<uint8_t>& d2_compact,
     cv::cuda::Stream& stream);
 
+  void gatherDescriptors(
+    const CudaDeviceVector<const uint8_t*>& descs,
+    int n,
+    cv::cudev::GpuMat_<uint8_t>& d_compact,
+    cv::cuda::Stream& stream);
+
   void scores(
      const cv::cudev::GpuMat_<uint8_t>& d1,
      const cv::cudev::GpuMat_<uint8_t>& d2,

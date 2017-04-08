@@ -9,10 +9,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
 
-#include "bucketizer.hpp"
 #include "clique.hpp"
 #include "reprojection_estimator.hpp"
-#include "rigid_estimator.hpp"
 
 #include "frame_processor.hpp"
 
@@ -26,8 +24,10 @@ struct CrossFrameProcessorConfig {
   int max_tracked_features_per_bucket = 20;
   int max_incoming_features = 4000;
   int min_features_for_estimation = 5;
+  int max_feature_missing_frames = 1;
   double max_reprojection_error = 2.0;
   double inlier_threshold = 3.0;
+  double near_feature_threshold = 20000;
 
   int maxTrackedFeatures() const {
     return max_tracked_features_per_bucket * x_buckets * y_buckets;
@@ -38,18 +38,17 @@ struct ReprojectionFeatureWithError : public StereoReprojectionFeature {
   double error;
 };
 
-struct CrossFrameDebugData {
-  std::vector<ReprojectionFeatureWithError> all_reprojection_features;
-  std::vector<std::vector<ReprojectionFeatureWithError> > reprojection_features;
-  std::vector<Eigen::Affine3d> pose_estimations;
-};
-
 struct WorldFeature {
   Eigen::Vector3d w;
-  Eigen::Vector2i left, right;
-  int desc_l, desc_r;
+  Eigen::Vector2d left, right;
   int score, age;
+  int bucket_id;
   WorldFeature* match;
+};
+
+struct CrossFrameDebugData {
+  std::vector<WorldFeature> tracked_features, new_features;
+  Eigen::Affine3d pose_estimation;
 };
 
 class CrossFrameProcessor {
@@ -66,47 +65,47 @@ class CrossFrameProcessor {
         CrossFrameDebugData* debug_data);
    
   private:
+    void fillNewFeatures_(const FrameData& d);
+
     void matchStereo_();
 
     void matchMono_(
         const cv::Mat_<uint16_t>& scores,
         std::vector<int>& matches);
 
-    bool isNear(const WorldFeature& f) const;
-    bool isFar(const WorldFeature& f) const;
+    bool isNear_(const WorldFeature& f) const;
+    bool isFar_(const WorldFeature& f) const;
 
     void pickInitialFeatures_();
 
-    void buildCliqueNear_(
-        const FrameData& p1, 
-        const FrameData& p2);
+    void buildCliqueNear_();
 
-    void buildCliqueFar_(
-        const FrameData& p1, 
-        const FrameData& p2);
+    void buildCliqueFar_();
 
     double deltaL(
-        const cv::Point3d& p1,
-        const cv::Point3d& p2);
+        const Eigen::Vector3d& p1,
+        const Eigen::Vector3d& p2);
 
-    void fillReprojectionFeatures_(
-        const FrameData& p1,
-        const FrameData& p2);
+    void fillReprojectionFeatures_();
 
-    double fillReprojectionErrors_(
+    void updateFeatures_(
+        const FrameData& p,
         const Eigen::Quaterniond& r, 
-        const Eigen::Vector3d& tm,
-        std::vector<ReprojectionFeatureWithError>& reprojection_features);
+        const Eigen::Vector3d& t);    
+
+    /* double fillReprojectionErrors_( */
+    /*     const Eigen::Quaterniond& r, */ 
+    /*     const Eigen::Vector3d& tm, */
+    /*     std::vector<ReprojectionFeatureWithError>& reprojection_features); */
 
     bool estimatePose_(
-        bool use_initial_estimate,
         Eigen::Quaterniond& r, 
         Eigen::Vector3d& t,
         Eigen::Matrix3d* t_cov,
         CrossFrameDebugData* debug_data);
 
     void estimateOne_(
-        const std::vector<ReprojectionFeatureWithError>& features,
+        const std::vector<StereoReprojectionFeature>& features,
         Eigen::Quaterniond& r, 
         Eigen::Vector3d& t,
         Eigen::Matrix3d* t_cov);
@@ -118,16 +117,19 @@ class CrossFrameProcessor {
 
     Matcher matcher_;
 
-    std::vector<WorldFeature> tracked_features_;
+    std::vector<WorldFeature> tracked_features_, new_features_, tmp_features_;
+
     std::unique_ptr<Stereo<cv::cudev::GpuMat_<uint8_t>>>
       tracked_descriptors_, back_desc_buffer_;
 
-    std::vector<WorldFeature*> features_with_matches_;
-    std::vector<WorldFeature*> near_features_, far_features_;
-
-    std::vector<WorldFeature*> estimation_features_;
-
-    std::vector<WorldFeature> new_features_;
+    std::vector<WorldFeature*> features_with_matches_,
+      clique_features_,
+      near_features_,
+      far_features_,
+      sorted_features_,
+      estimation_features_;
+    Stereo<std::vector<const uint8_t*>> new_descriptors_;
+    Stereo<CudaDeviceVector<const uint8_t*>> new_descriptors_gpu_;
 
     Stereo<cv::cudev::GpuMat_<uint16_t>> scores_gpu_;
     Stereo<cv::Mat_<uint16_t>> scores_cpu_;
@@ -138,11 +140,10 @@ class CrossFrameProcessor {
      // Clique builder
     Clique clique_;
     // Reprojection features for full_matches_;
-    std::vector<ReprojectionFeatureWithError> all_reprojection_features_;
-    std::vector<ReprojectionFeatureWithError> filtered_reprojection_features_;
-    std::vector<StereoReprojectionFeature> tmp_reprojection_features_;
+    /* std::vector<ReprojectionFeatureWithError> reprojection_features_; */
+    /* std::vector<ReprojectionFeatureWithError> filtered_reprojection_features_; */
+    std::vector<StereoReprojectionFeature> reprojection_features_;
     // estimators
-    RigidEstimator rigid_estimator_;
     StereoReprojectionEstimator reprojection_estimator_;
 };
 

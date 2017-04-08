@@ -233,8 +233,7 @@ int main(int argc, char** argv) {
     if (frame_index > 0) {
        e::Matrix3d t_cov;
       ok = cross_processor.process(
-          prev_frame, cur_frame, 
-          /*have_valid_estimate*/ false, 
+          cur_frame, 
           d_r, d_t, 
           &t_cov, 
           debug ? &cross_frame_debug_data : nullptr);
@@ -293,16 +292,14 @@ int main(int argc, char** argv) {
 
     if (frame_index > 0 && (debug == 2 || (debug == 1 && !ok))) {
 
-      DebugRenderer renderer(
+      std::unique_ptr<DebugRenderer> renderer(DebugRenderer::create(
           calib,
-          frame_data[prev_index],
-          frame_debug_data[prev_index],
           frame_data[cur_index],
           frame_debug_data[cur_index],
           cross_frame_debug_data,
           ground_truth.empty() ? nullptr : &gt_d,
-          1920, 1080);
-      if (!renderer.loop()) {
+          1920, 1080));
+      if (!renderer->loop()) {
         break;
       }
     }

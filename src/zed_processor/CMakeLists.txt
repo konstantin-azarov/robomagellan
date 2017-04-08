@@ -241,37 +241,37 @@ target_link_libraries(
   reprojection_estimator_test
   reprojection_estimator)
 
-#add_executable(
-#  process
-#  src/process.cc
-#  src/bag_video_reader.cc
-#  src/calibration_data.cc
-#  src/clique.cc
-#  src/cross_frame_processor.cc
-#  src/debug_renderer.cc
-#  src/direction_target.cc
-#  src/direction_tracker.cc
-#  src/frame_processor.cc
-#  src/kitti_video_reader.cc
-#  src/raw_video_reader.cc
-#  src/rigid_estimator.cc
-#  src/utils.cc
-#)
-#
-#target_link_libraries(
-#  process
-#  descriptor_tools
-#  math3d
-#  reprojection_estimator
-#  freak_gpu
-#  fast_gpu
-#  stereo_matcher
-#  libdw.so
-#  ${catkin_LIBRARIES}
-#  ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY} nvToolsExt
-#  ${OpenCV_LIBS}
-#  ${Boost_LIBRARIES}
-#)
+add_executable(
+  process
+  src/process.cc
+  src/bag_video_reader.cc
+  src/calibration_data.cc
+  src/clique.cc
+  src/cross_frame_processor.cc
+  src/debug_renderer.cc
+  src/direction_target.cc
+  src/direction_tracker.cc
+  src/frame_processor.cc
+  src/kitti_video_reader.cc
+  src/raw_video_reader.cc
+  src/rigid_estimator.cc
+  src/utils.cc
+)
+
+target_link_libraries(
+  process
+  descriptor_tools
+  math3d
+  reprojection_estimator
+  freak_gpu
+  fast_gpu
+  stereo_matcher
+  libdw.so
+  ${catkin_LIBRARIES}
+  ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY} nvToolsExt
+  ${OpenCV_LIBS}
+  ${Boost_LIBRARIES}
+)
 
 add_executable(
   process_race

@@ -10,39 +10,115 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-DebugRenderer::DebugRenderer(
+class StereoCalibrationData;
+struct FrameData;
+struct FrameDebugData;
+struct CrossFrameDebugData;
+
+class DebugRendererImpl : public DebugRenderer {
+  public:
+    DebugRendererImpl(
+        const StereoCalibrationData& calib,
+        const FrameData& f,
+        const FrameDebugData& fd,
+        const CrossFrameDebugData& cfd,
+        const Eigen::Affine3d* ground_truth,
+        int max_width, int max_height) :
+        calib_(calib), 
+        frame_data_(f),
+        frame_debug_data_(fd),
+        cross_frame_debug_data_(cfd),
+        ground_truth_(ground_truth) {
+      w_ = fd.undistorted_image[0].cols;
+      h_ = fd.undistorted_image[0].rows;
+
+      scale_ = 1.0;
+      if (2*w_ > max_width_) {
+        scale_ = max_width_/(2.0*w_);
+      }
+
+      if (h_ > max_height_) {
+        scale_ = std::min(scale_, max_height_/(2.0*h_));
+      }
+    }
+
+    virtual bool loop() {
+      bool done = false,
+           next_frame = false;
+
+      while (!done) {
+        renderStereo_();
+        
+        cv::Mat scaled_image;
+        cv::resize(img_, scaled_image, cv::Size(), scale_, scale_);
+        cv::imshow("debug", scaled_image);
+
+        int key = cv::waitKey(0);
+        if (key != -1) {
+          key &= 0xFF;
+        }
+        switch(key) {
+          case 'n':
+            next_frame = true;
+            done = true;
+            break;
+          case 27:
+            done = true;
+            break;
+        }
+      }
+
+      return next_frame;
+    }
+
+  private:
+    void renderStereo_() {
+      img_.create(2*h_, 2*w_, CV_8UC3);
+  
+      auto* imgs = frame_debug_data_.undistorted_image;
+
+      renderImage_(imgs[0], img_(cv::Range(0, h_), cv::Range(0, w_)));
+      renderImage_(imgs[1], img_(cv::Range(0, h_), cv::Range(w_, 2*w_)));
+    }
+
+    void renderImage_(const cv::Mat& src, const cv::Mat& dest) {
+      cv::Mat tmp;
+
+      cv::cvtColor(src, tmp, CV_GRAY2RGB);
+      cv::resize(tmp, dest, dest.size());
+    }
+
+  private:
+    int max_width_, max_height_;
+
+    double scale_;
+    int w_, h_;
+
+    const StereoCalibrationData& calib_;
+
+    const FrameData& frame_data_;
+    const FrameDebugData& frame_debug_data_;
+    const CrossFrameDebugData& cross_frame_debug_data_;
+
+    const Eigen::Affine3d* ground_truth_;
+    
+    cv::Mat img_;
+    std::pair<int, int> selection_;
+};
+
+DebugRenderer* DebugRenderer::create(
     const StereoCalibrationData& calib,
-    const FrameData& f1,
-    const FrameDebugData& d1,
-    const FrameData& f2,
-    const FrameDebugData& d2,
+    const FrameData& f,
+    const FrameDebugData& fd,
     const CrossFrameDebugData& cfd,
-    Eigen::Affine3d* ground_truth,
-    int max_width, int max_height) 
-    : calib_(calib),
-      f1_(f1), fd1_(d1),
-      f2_(f2), fd2_(d2),
-      cfd_(cfd),
-      ground_truth_(ground_truth),
-      max_width_(max_width), 
-      max_height_(max_height) {
-  assert(max_width_ % 2 == 0);
-  assert(max_height_ % 2 == 0);
-
-  const auto& left1 = fd1_.undistorted_image[0];
-
-  w_ = left1.cols;
-  h_ = left1.rows;
-
-  scale_ = 1.0;
-  if (2*w_ > max_width_) {
-    scale_ = max_width_/(2.0*w_);
-  }
-
-  if (2*h_ > max_height_) {
-    scale_ = std::min(scale_, max_height_/(2.0*h_));
-  }
+    const Eigen::Affine3d* ground_truth_t, 
+    int max_width, int max_height) {
+  return new DebugRendererImpl(
+      calib, f, fd, cfd, ground_truth_t, max_width, max_height);
 }
+
+#if 0
+
 
 bool DebugRenderer::loop() {
   bool done = false,
@@ -464,3 +540,5 @@ void DebugRenderer::drawImage_(const cv::Mat& src, const cv::Mat& dest) {
 /*     cv::line(img_, p1l, p2l, cv::Scalar(0, 255, 0)); */
 /*     cv::line(img_, p1r, p2r, cv::Scalar(0, 255, 0)); */
 /* } */
+
+#endif
