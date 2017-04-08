@@ -26,9 +26,9 @@ class Controller {
     Controller(ros::NodeHandle& node) 
         : smoothing_(node.param("smoothing", 0.6)),
           s_(
-              node.param("k_l", 5),
-              node.param("k_r", 5),
-              node.param("b", 0.239)),
+              node.param("k_l", 2.1),
+              node.param("k_r", 2.1),
+              node.param("b", 3.1)),
           p_(e::Vector3f(
                 node.param("k_v", 0.5),
                 node.param("k_v", 0.5),
@@ -89,9 +89,9 @@ class Controller {
       updateControl_();
       sendControl_();
 
-      ROS_INFO("K: %f %f %f", s_.x(), s_.y(), s_.z());
-      ROS_INFO("Received control: %f %f => (%f %f)", 
-          target_v_, target_w_, cmd_left_, cmd_right_);
+      /* ROS_INFO("K: %f %f %f", s_.x(), s_.y(), s_.z()); */
+      /* ROS_INFO("Received control: %f %f => (%f %f)", */ 
+      /*     target_v_, target_w_, cmd_left_, cmd_right_); */
     }
 
   private:  

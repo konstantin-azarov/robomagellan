@@ -238,7 +238,7 @@ void CameraDriver::AutoControlsCallback(
   void *data, size_t data_len) {
   boost::recursive_mutex::scoped_lock(mutex_);
 
-  printf("Controls callback. class: %d, event: %d, selector: %d, attr: %d, data_len: %u\n",
+  printf("Controls callback. class: %d, event: %d, selector: %d, attr: %d, data_len: %lu\n",
          status_class, event, selector, status_attribute, data_len);
 
   if (status_attribute == UVC_STATUS_ATTRIBUTE_VALUE_CHANGE) {
@@ -410,9 +410,6 @@ void CameraDriver::OpenCamera(UVCCameraConfig &new_config) {
     uvc_print_diag(devh_, NULL);
     return;
   }
-
-  ROS_INFO("Found stream: %d %d %d", 
-      new_config.width, new_config.height, new_config.frame_rate);
 
   uvc_error_t stream_err = uvc_start_streaming(devh_, &ctrl, &CameraDriver::ImageCallbackAdapter, this, 0);
 
