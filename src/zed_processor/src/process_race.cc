@@ -49,21 +49,24 @@ const double kLaneMaxStartDistance = 100;
 const double kLaneMaxContinuationDistance = 1000;
 const double kLaneFoldInDistance = 50;
 const double kLaneMinContinuationCosine = cos(20 * M_PI / 180.0); 
-const int kLaneMinPoints = 15;
+const int kLaneMinPoints = 10;
+
+const int kLaneRansacIterations = 100;
+const double kLaneRansacMinInliers = 20;
+const double kLaneRansacInlierDistance = 50;
 
 const double kLaneExtensionBase = 300;
 const double kLaneExtensionLength = 10E+3;
 
 const double kInitialWidthEstimate = 2E+3;
 
-const double kMaxSpeed = 5E+3 / 3.6;
-const int kSpeedSteps = 4;
-const double kMaxTurnRate = 30 * M_PI / 180;
+const std::vector<double> kSpeeds = { 0.7E+3, 1.0E+3, 1.3E+3, 1.5E+3, 1.8E+3};
+const double kMaxTurnRate = 50 * M_PI / 180;
 const double kTurnRateSteps = 10;
 
 const double kTrackDistance = 5E+3;
 const int kTrackPoints = 21;
-const double kTrackTimeStep = kTrackDistance / kMaxSpeed / (kTrackPoints-1);
+const double kTrackTimeStep = kTrackDistance / kSpeeds.back() / (kTrackPoints-1);
 const double kTrackTailLength = 10E+3;
 
 const double kBestClearTime = 5.0;
@@ -299,10 +302,10 @@ void extractLanes(const std::vector<e::Vector2d>& points,
     if (lane.size() > kLaneMinPoints) {
       double s = lane[0].x();
 
-      if (s < 0 && lane[0].x() > best_left_x) {
+      if (s < -30 && lane[0].x() > best_left_x) {
         best_left_x = lane[0].x();
         best_left = i;
-      } else if (s > 0 && lane[0].x() < best_right_x) {
+      } else if (s > 30 && lane[0].x() < best_right_x) {
         best_right_x = lane[0].x();
         best_right = i;
       }
@@ -316,6 +319,77 @@ void extractLanes(const std::vector<e::Vector2d>& points,
     right = lanes[best_right];
   }
 }
+
+/* double parabolaPointDistane(int a, int b, int c, int x0, int y0) { */
+/*   double a1 = -a; */
+/*   double b1 = 2*a*x0 - b; */
+/*   double c1 = x0*b + b*c + c - y0; */
+
+/*   double d = */ 
+/* }; */
+
+struct Lane {
+  double a, b, c;
+  double y0, y1;
+};
+
+void extractLanesRansac(
+    const std::vector<e::Vector2d>& points,
+    std::vector<Lane>& lanes) {
+  lanes.clear();
+
+  std::uniform_int_distribution<> dist(0, points.size() - 1);
+  std::default_random_engine e;
+
+  for (int t = 0; t < kLaneRansacIterations; t++) {
+    int i1 = dist(e);
+    int i2 = dist(e);
+    int i3 = dist(e);
+
+    if (i1 == i2 || i1 == i3 || i2 == i3) {
+      continue;
+    }
+
+    double x1 = points[i1].x();
+    double y1 = points[i1].y();
+    double x2 = points[i2].x();
+    double y2 = points[i2].y();
+    double x3 = points[i3].x();
+    double y3 = points[i3].y();
+
+    e::Matrix3d m;
+    m << y1*y1, y1, 1,
+         y2*y2, y2, 1,
+         y3*y3, y3, 1;
+
+    e::Vector3d r(x1, x2, x3);
+
+    e::Vector3d c = m.inverse() * r;
+
+    int inliers_count = 0;
+    double y_min = -1, y_max = 0;
+    for (int i = 0; i < points.size(); ++i) {
+      double x = points[i].x();
+      double y = points[i].y();
+      double d = fabs(c.x() * y * y + c.y() * y + c.z() - x);
+      if (d < kLaneRansacInlierDistance) {
+        inliers_count++;
+        if (y_min == -1) {
+          y_min = y;
+        }
+        y_max = y;
+      }
+    }
+
+    if (inliers_count > kLaneRansacMinInliers) {
+      lanes.push_back(Lane {
+        c.x(), c.y(), c.z(),
+        y_min, y_max
+      });
+    }
+  }
+}
+
 
 double estimateTrackWidth(
     std::vector<e::Vector2d>& left,
@@ -474,11 +548,11 @@ void updateSteeringCommand(
   Command best_command;
   best_command.clear_time = 0;
 
-  for (int k_v = 1; k_v <= kSpeedSteps; ++k_v) {
+  for (double v : kSpeeds) {
     for (int k_w = -kTurnRateSteps; k_w <= kTurnRateSteps; k_w++) {
       auto cmd = evalCommand(
           left, right, 
-          kMaxSpeed * k_v / kSpeedSteps, 
+          v, 
           kMaxTurnRate * k_w / kTurnRateSteps);
 
 //      std::cout << "CMD: v=" << cmd.v << ", w=" << cmd.w << ": " << cmd.clear_time << std::endl; 
@@ -529,7 +603,7 @@ bool enhanceLanes(
       right[i] = e::Vector2d(left[i].x() + width_estimate, left[i].y());
     }
   } else {
-    width_estimate = estimateTrackWidth(left, right, width_estimate);
+    //width_estimate = estimateTrackWidth(left, right, width_estimate);
   }
 
   left.insert(left.begin(), e::Vector2d(left.front().x(), 0));
@@ -631,6 +705,7 @@ int main(int argc, char** argv) {
   std::vector<e::Vector3d> candidate_points;
   std::vector<e::Vector2d> projected_points;
   std::vector<e::Vector2d> left_lane, right_lane;
+  std::vector<Lane> lanes_ransac;
   double width_estimate = kInitialWidthEstimate;
 
   int img_mode = 0, frame_by_frame_mode = rdr != nullptr;
@@ -694,7 +769,7 @@ int main(int argc, char** argv) {
     cv::inRange(
         hsv_mat,
         cv::Scalar(0, 0, 180),
-        cv::Scalar(255, 50, 255),
+        cv::Scalar(255, 30, 255),
         thresholded_img);
 
     buildCandidatePoints(scaled_intrinsics, thresholded_img, candidate_points);
@@ -707,6 +782,8 @@ int main(int argc, char** argv) {
       projectPoints(candidate_points, plane, projected_points); 
       extractLanes(projected_points, left_lane, right_lane);
 
+      extractLanesRansac(projected_points, lanes_ransac);
+
       if (!enhanceLanes(left_lane, right_lane, width_estimate)) {
         fail = true;
       } else {
@@ -717,7 +794,8 @@ int main(int argc, char** argv) {
     if (fail) {
       failed_frames++;
     }
-   
+
+  
     
     auto t2 = c::high_resolution_clock::now();
 
@@ -804,6 +882,19 @@ int main(int argc, char** argv) {
 
         }
       }
+      
+      // Render ransac lanes
+      std::cout << "Ransac lanes: " << lanes_ransac.size() << std::endl;
+      for (const auto& l : lanes_ransac) {
+        std::cout << "Line: " << l.y0 << " " << l.y1 << std::endl;
+        for (int y=l.y0+1; y <= l.y1; ++y) {
+          cv::line(
+              map_img,
+              cv::Point(cx + s*((y-1)*(y-1)*l.a + (y-1)*l.b + l.c), cy - s*(y-1)),
+              cv::Point(cx + s*(y*y*l.a + y*l.b + l.c), cy - s*y),
+              cv::Scalar(255, 0, 0));
+        }
+      }
 
       cv::line(map_img, cv::Point(cx - 5, cy), cv::Point(cx + 5, cy), cv::Scalar(0, 0, 255));
       cv::line(map_img, cv::Point(cx, cy - 5), cv::Point(cx, cy + 5), cv::Scalar(0, 0, 255)); 
@@ -823,6 +914,7 @@ int main(int argc, char** argv) {
             cv::Point(cx + c.x()*s, cy - c.y()*s),
             cv::Scalar(0, 255, 255));
       }
+
 
       if (g_control_active) {
         cv::putText(map_img, "LIVE", cv::Point(0, kMapHeight), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255));
