@@ -10,6 +10,16 @@ using namespace std::chrono;
 
 namespace e = Eigen; 
 
+std::ostream& operator << (std::ostream& s, const e::Vector3d& v) {
+  s << "(" << v.x() << ", " << v.y() << ", " << v.z() << ")";
+  return s;
+}
+
+std::ostream& operator << (std::ostream& s, const e::Vector2d& v) {
+  s << "(" << v.x() << ", " << v.y() << ")";
+  return s;
+}
+
 CrossFrameProcessor::CrossFrameProcessor(
     const StereoCalibrationData& calibration,
     const CrossFrameProcessorConfig& config) 
@@ -20,6 +30,7 @@ CrossFrameProcessor::CrossFrameProcessor(
     matcher_(config_.maxTrackedFeatures(), config_.max_incoming_features) {
 
     int n = config_.maxTrackedFeatures();
+    int m = config_.max_incoming_features;
 
     tracked_features_.reserve(n);
     new_features_.reserve(n);
@@ -39,10 +50,10 @@ CrossFrameProcessor::CrossFrameProcessor(
     new_descriptors_.l.reserve(n);
     new_descriptors_.r.reserve(n);
 
-    scores_gpu_.l.create(n, FreakGpu::kDescriptorWidth);
-    scores_gpu_.r.create(n, FreakGpu::kDescriptorWidth);
-    scores_cpu_.l.create(n, FreakGpu::kDescriptorWidth);
-    scores_cpu_.r.create(n, FreakGpu::kDescriptorWidth);
+    scores_gpu_.l.create(n, m);
+    scores_gpu_.r.create(n, m); 
+    scores_cpu_.l.create(n, m);
+    scores_cpu_.r.create(n, m);
 }
 
 bool CrossFrameProcessor::process(
@@ -58,59 +69,82 @@ bool CrossFrameProcessor::process(
   int n_f = tracked_features_.size();
   int n_p = new_features_.size();
 
+  std::cout << "Ego: " << n_f << " " << n_p << std::endl;
+
+  bool valid_estimate = true;
+
   auto t1 = std::chrono::high_resolution_clock::now();
 
-  descriptor_tools::scores(
-      tracked_descriptors_->l.rowRange(0, n_f),
-      p.d_left.rowRange(0, n_p),
-      scores_gpu_.l,
-      cv::cuda::Stream::Null());
+  if (n_f > 0) {
+    descriptor_tools::scores(
+        tracked_descriptors_->l.rowRange(0, n_f),
+        p.d_left.rowRange(0, n_p),
+        scores_gpu_.l,
+        cv::cuda::Stream::Null());
 
-  descriptor_tools::scores(
-      tracked_descriptors_->r.rowRange(0, n_f),
-      p.d_right.rowRange(0, n_p), 
-      scores_gpu_.r,
-      cv::cuda::Stream::Null());
+    descriptor_tools::scores(
+        tracked_descriptors_->r.rowRange(0, n_f),
+        p.d_right.rowRange(0, n_p), 
+        scores_gpu_.r,
+        cv::cuda::Stream::Null());
 
-  scores_gpu_.l(cv::Range(0, n_f), cv::Range(0, n_p)).download(
-      scores_cpu_.l(cv::Range(0, n_f), cv::Range(0, n_p)));
-  scores_gpu_.r(cv::Range(0, n_f), cv::Range(0, n_p)).download(
-      scores_cpu_.r(cv::Range(0, n_f), cv::Range(0, n_p)));
+    cv::Mat_<uint16_t> scores_l = 
+      scores_cpu_.l(cv::Range(0, n_f), cv::Range(0, n_p));
+    cv::Mat_<uint16_t> scores_r =
+      scores_cpu_.r(cv::Range(0, n_f), cv::Range(0, n_p));
 
-  matchStereo_();
+    scores_gpu_.l(cv::Range(0, n_f), cv::Range(0, n_p)).download(scores_l);
+    scores_gpu_.r(cv::Range(0, n_f), cv::Range(0, n_p)).download(scores_r);
 
-  if (debug_data != nullptr) {
-    debug_data->tracked_features = tracked_features_;
-    debug_data->new_features = new_features_;
-  }
+    matchStereo_(scores_l, scores_r);
 
-  features_with_matches_.resize(0);
+    if (debug_data != nullptr) {
+      debug_data->tracked_features = tracked_features_;
+      debug_data->new_features = new_features_;
+    }
 
-  for (auto& f : tracked_features_) {
-    if (f.match != nullptr) {
-      features_with_matches_.push_back(&f);
-      if (isNear_(f)) {
-        near_features_.push_back(&f);
-      } else if (isFar_(f)) {
-        far_features_.push_back(&f);
+    features_with_matches_.resize(0);
+    near_features_.resize(0);
+    far_features_.resize(0);
+
+    for (auto& f : tracked_features_) {
+      if (f.match != nullptr) {
+        features_with_matches_.push_back(&f);
+        if (isNear_(f)) {
+          near_features_.push_back(&f);
+        } else if (isFar_(f)) {
+          far_features_.push_back(&f);
+        }
       }
     }
-  }
 
-  buildCliqueNear_();
-  buildCliqueFar_();
+    std::cout << "Near = " << near_features_.size() 
+              << ", Far = " << far_features_.size() << std::endl;
 
-  fillReprojectionFeatures_();
+    estimation_features_.clear();
+
+    buildCliqueNear_();
+    buildCliqueFar_();
+
+    std::cout << "Estimation = " << estimation_features_.size() << std::endl;
+
+    fillReprojectionFeatures_();
 
 
-  if (!estimatePose_(r, t, t_cov, debug_data)) {
-    return false;
+    if (!estimatePose_(r, t, t_cov, debug_data)) {
+      valid_estimate = false;
+    }
+  } else {
+    valid_estimate = false;
   }
 
   updateFeatures_(p, r, t);
 
   auto t4 = std::chrono::high_resolution_clock::now();
-  
+
+  std::cout << "Odometry stats: " << std::endl;
+  std::cout << "  tracked = " << tracked_features_.size() << std::endl;
+
  /* std::cout */ 
   /*   << "matches = " << full_matches_.size() */ 
 /* //    s< " clique = " << clique_reprojection_features_.size() */ 
@@ -122,7 +156,7 @@ bool CrossFrameProcessor::process(
   /*   << std::endl; */
 
 
-  return true;
+  return valid_estimate;
 }
 
 void CrossFrameProcessor::fillNewFeatures_(const FrameData& d) {
@@ -139,19 +173,25 @@ void CrossFrameProcessor::fillNewFeatures_(const FrameData& d) {
     f.bucket_id = 0;
     f.match = nullptr;
 
+    /* std::cout << "N: " << f.w << " " << f.left << " " << f.right << std::endl; */
+
     new_features_.push_back(f);
   }
 }
 
-void CrossFrameProcessor::matchStereo_() {
-  matchMono_(scores_cpu_.l, matches_.l);
-  matchMono_(scores_cpu_.r, matches_.r);
+void CrossFrameProcessor::matchStereo_(
+    const cv::Mat_<uint16_t>& scores_l, const cv::Mat_<uint16_t>& scores_r) {
+  matchMono_(scores_l, matches_.l);
+  matchMono_(scores_r, matches_.r);
 
   int n = tracked_features_.size();
 
   for (int i = 0; i < n; ++i) {
     if (matches_.l[i] == matches_.r[i]) {
       tracked_features_[i].match = &new_features_[matches_.l[i]];
+
+      /* std::cout << "M: " << i << " -> " << matches_.l[i] << std::endl; */
+
       new_features_[matches_.l[i]].match = &tracked_features_[i];
     }
   }
@@ -178,6 +218,7 @@ void CrossFrameProcessor::matchMono_(
     }
 
     matches[i] = best_j;
+    /* std::cout << "MM:" << i << " -> " << matches[i] << std::endl; */
   }
 }
 
@@ -185,8 +226,8 @@ void CrossFrameProcessor::updateFeatures_(
     const FrameData& p,
     const e::Quaterniond& r, const e::Vector3d& t) {
   auto r_inv = r.inverse();
-  double bucket_w = 0; // xcxc
-  double bucket_h = 0; // xcxc
+  double bucket_w = calibration_.raw.size.width / config_.x_buckets;
+  double bucket_h = calibration_.raw.size.height / config_.y_buckets;
   // translate features, remove matches, update age and remove stale features
   // update bucket index
   sorted_features_.clear();
@@ -212,10 +253,6 @@ void CrossFrameProcessor::updateFeatures_(
     std::tie(f.left, f.right) = projectPoint(
         calibration_.intrinsics, f.w);
 
-    int hor_idx = f.left.x() / bucket_w;
-    int vert_idx = f.left.y() / bucket_h;
-    f.bucket_id = vert_idx * config_.x_buckets + hor_idx;
-
     sorted_features_.push_back(&f);
   }
 
@@ -224,6 +261,12 @@ void CrossFrameProcessor::updateFeatures_(
       sorted_features_.push_back(&f);
     }
   }
+
+  for (auto* f : sorted_features_) {
+    int hor_idx = f->left.x() / bucket_w;
+    int vert_idx = f->left.y() / bucket_h;
+    f->bucket_id = vert_idx * config_.x_buckets + hor_idx;
+ }
 
   std::sort(
       std::begin(sorted_features_),
@@ -303,6 +346,11 @@ void CrossFrameProcessor::buildCliqueNear_() {
   // first image is equal to the distance between corresponding points in the
   // last image.
   int n = near_features_.size();
+  
+  if (n == 0) {
+    return;
+  }
+
   clique_.reset(n);
 
   for (int i = 0; i < n; ++i) {
@@ -330,6 +378,11 @@ void CrossFrameProcessor::buildCliqueNear_() {
 
 void CrossFrameProcessor::buildCliqueFar_() {
   int n = far_features_.size();
+
+  if (n == 0) {
+    return;
+  }
+
   clique_.reset(n);
 
   for (int i = 0; i < n; ++i) {
@@ -392,8 +445,14 @@ void CrossFrameProcessor::fillReprojectionFeatures_() {
     rf.s1l = ef->match->left;
     rf.s1r = ef->match->right;
 
+    /* std::cout << "F: " << rf.r2 << " " << rf.s2l << " " << rf.s2r */ 
+              /* << " " << rf.r1 << " " << rf.s1l << " " << rf.s1r << std::endl; */ 
+
     reprojection_features_.push_back(rf);
   }
+
+  std::cout << "Reprojection features: " << reprojection_features_.size() 
+    << std::endl;
 }
 
 /* double CrossFrameProcessor::fillReprojectionErrors_( */

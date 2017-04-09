@@ -33,12 +33,12 @@ class DebugRendererImpl : public DebugRenderer {
       h_ = fd.undistorted_image[0].rows;
 
       scale_ = 1.0;
-      if (2*w_ > max_width_) {
-        scale_ = max_width_/(2.0*w_);
+      if (2*w_ > max_width) {
+        scale_ = max_width/(2.0*w_);
       }
 
-      if (h_ > max_height_) {
-        scale_ = std::min(scale_, max_height_/(2.0*h_));
+      if (h_ > max_height) {
+        scale_ = std::min(scale_, max_height/(2.0*h_));
       }
     }
 
@@ -89,8 +89,6 @@ class DebugRendererImpl : public DebugRenderer {
     }
 
   private:
-    int max_width_, max_height_;
-
     double scale_;
     int w_, h_;
 

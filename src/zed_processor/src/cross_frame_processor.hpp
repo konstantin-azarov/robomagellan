@@ -67,7 +67,9 @@ class CrossFrameProcessor {
   private:
     void fillNewFeatures_(const FrameData& d);
 
-    void matchStereo_();
+    void matchStereo_(
+        const cv::Mat_<uint16_t>& scores_l,
+        const cv::Mat_<uint16_t>& scores_r);
 
     void matchMono_(
         const cv::Mat_<uint16_t>& scores,

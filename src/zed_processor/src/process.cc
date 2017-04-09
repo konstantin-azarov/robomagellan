@@ -191,8 +191,6 @@ int main(int argc, char** argv) {
 
   e::Quaterniond d_r;
   e::Vector3d d_t;
-  bool have_valid_estimate = false;
-
   double speed = 60*0.1/3.6*1000;
 
   bool done = false;
@@ -230,51 +228,46 @@ int main(int argc, char** argv) {
     }
  
     bool ok = false;
-    if (frame_index > 0) {
-       e::Matrix3d t_cov;
-      ok = cross_processor.process(
-          cur_frame, 
-          d_r, d_t, 
-          &t_cov, 
-          debug ? &cross_frame_debug_data : nullptr);
+  
+    e::Matrix3d t_cov;
+    ok = cross_processor.process(
+        cur_frame, 
+        d_r, d_t, 
+        &t_cov, 
+        debug ? &cross_frame_debug_data : nullptr);
 
-      have_valid_estimate = ok;
+    timer.mark("cross");
 
-      timer.mark("cross");
+    if (ok) {
+      double e2 = t_cov.trace();
+      if (e2 > 0.02*0.02*speed*speed && e2 > 25) {
+        std::cout << "FAIL";
+        std::cout << "T_cov = " << t_cov << std::endl; 
+        std::cout << "t = " << d_t << std::endl;
+        std::cout << "speed = " << speed << std::endl;
+        ok = false;
+      } else {
+        cam_t += cam_r*d_t;
+        cam_r = cam_r*d_r;
+        cam_r.normalize();
+      }
+      speed = d_t.norm();
+      
+      auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI;
+      std::cout << "yaw = " << ypr.x() 
+                << ", pitch = " << ypr.y() 
+                << ", roll = " << ypr.z() << endl;
+      std::cout << "T = " << cam_t.transpose() << endl; 
+      std::cout << "T_cov = " << t_cov << std::endl;
 
-      if (ok) {
-        double e2 = t_cov.trace();
-        if (e2 > 0.02*0.02*speed*speed && e2 > 25) {
-          std::cout << "FAIL";
-          std::cout << "T_cov = " << t_cov << std::endl; 
-          std::cout << "t = " << d_t << std::endl;
-          std::cout << "speed = " << speed << std::endl;
-          have_valid_estimate = false;
-          ok = false;
-        } else {
-          cam_t += cam_r*d_t;
-          cam_r = cam_r*d_r;
-          cam_r.normalize();
-        }
-        speed = d_t.norm();
-        
-        auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI;
-        std::cout << "yaw = " << ypr.x() 
-                  << ", pitch = " << ypr.y() 
-                  << ", roll = " << ypr.z() << endl;
-        std::cout << "T = " << cam_t.transpose() << endl; 
-        std::cout << "T_cov = " << t_cov << std::endl;
-
-        if (!ground_truth.empty()) {
-          auto gt = ground_truth[global_frame_index];
-          auto ypr_gt = rotToYawPitchRoll(gt.first);
-          auto t_gt = gt.second;
-          std::cout << "GT: yaw = " << ypr_gt.x() 
-                    << ", pitch = " << ypr_gt.y() 
-                    << ", roll = " << ypr_gt.z() << endl;
-          std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; 
-        }
-
+      if (!ground_truth.empty()) {
+        auto gt = ground_truth[global_frame_index];
+        auto ypr_gt = rotToYawPitchRoll(gt.first);
+        auto t_gt = gt.second;
+        std::cout << "GT: yaw = " << ypr_gt.x() 
+                  << ", pitch = " << ypr_gt.y() 
+                  << ", roll = " << ypr_gt.z() << endl;
+        std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; 
       }
     }
 
@@ -290,7 +283,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "Times: " << timer.str() << std::endl;
 
-    if (frame_index > 0 && (debug == 2 || (debug == 1 && !ok))) {
+    if (debug == 2 || (debug == 1 && !ok)) {
 
       std::unique_ptr<DebugRenderer> renderer(DebugRenderer::create(
           calib,
