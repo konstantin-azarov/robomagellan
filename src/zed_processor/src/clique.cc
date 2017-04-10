@@ -8,6 +8,11 @@ void Clique::reset(int n) {
   std::fill(graph_.begin(), graph_.end(), 0);
   degrees_.resize(n);
   std::fill(degrees_.begin(), degrees_.end(), 0);
+  colors_.resize(n);
+}
+
+void Clique::setColor(int i, int c) {
+  colors_[i] = c;
 }
 
 void Clique::addEdge(int i, int j) {
@@ -17,10 +22,14 @@ void Clique::addEdge(int i, int j) {
   if (!graph_[edge_(i, j)]) { 
     graph_[edge_(i, j)] = 1;
     graph_[edge_(j, i)] = 1;
-    degrees_[i]++;
-    degrees_[j]++;
+    if (colors_[i] != colors_[j]) {
+      degrees_[i]++;
+      degrees_[j]++;
+    }
   }
 }
+
+#include <iostream>
 
 const std::vector<int>& Clique::compute() {
   assert(n_ > 0);
@@ -44,10 +53,12 @@ const std::vector<int>& Clique::compute() {
   int t = 0;
   while (best >= 0) {
     clique_.push_back(best);
+    int c = colors_[best];
   
     candidates_[1-t].resize(0);
     for (int i=0; i < (int)candidates_[t].size(); ++i) {
-      if (best != candidates_[t][i] && graph_[edge_(best, candidates_[t][i])]) {
+      if (c != colors_[candidates_[t][i]] && 
+          graph_[edge_(best, candidates_[t][i])]) {
         candidates_[1-t].push_back(candidates_[t][i]);
       }
     }

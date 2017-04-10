@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <vector>
+#include <set>
 
 #include <opencv2/core.hpp>
 #include <opencv2/cudev/ptr2d/gpumat.hpp>
@@ -20,11 +21,11 @@ class FrameData;
 
 struct CrossFrameProcessorConfig {
   int match_radius = 100;
-  int x_buckets = 10, y_buckets = 10;
+  int x_buckets = 7, y_buckets = 5;
   int max_tracked_features_per_bucket = 20;
+  int max_estimation_features_per_bucket = 2;
   int max_incoming_features = 4000;
   int min_features_for_estimation = 5;
-  int max_feature_missing_frames = 1;
   double max_reprojection_error = 2.0;
   double inlier_threshold = 3.0;
   double near_feature_threshold = 20000;
@@ -46,8 +47,17 @@ struct WorldFeature {
   WorldFeature* match;
 };
 
+struct FeatureWithError {
+  WorldFeature* f;
+  double err;
+};
+
 struct CrossFrameDebugData {
-  std::vector<WorldFeature> tracked_features, new_features;
+  std::vector<WorldFeature> old_tracked_features, 
+                            new_tracked_features, 
+                            new_features;
+  std::set<const WorldFeature*> near_features, far_features;
+
   Eigen::Affine3d pose_estimation;
 };
 
@@ -95,19 +105,14 @@ class CrossFrameProcessor {
         const Eigen::Quaterniond& r, 
         const Eigen::Vector3d& t);    
 
-    /* double fillReprojectionErrors_( */
-    /*     const Eigen::Quaterniond& r, */ 
-    /*     const Eigen::Vector3d& tm, */
-    /*     std::vector<ReprojectionFeatureWithError>& reprojection_features); */
+    double fillReprojectionErrors_(
+        const Eigen::Quaterniond& r, 
+        const Eigen::Vector3d& tm);
+
+    void selectInitialEstimationFeatures_();
+    void selectFinalEstimationFeatures_();
 
     bool estimatePose_(
-        Eigen::Quaterniond& r, 
-        Eigen::Vector3d& t,
-        Eigen::Matrix3d* t_cov,
-        CrossFrameDebugData* debug_data);
-
-    void estimateOne_(
-        const std::vector<StereoReprojectionFeature>& features,
         Eigen::Quaterniond& r, 
         Eigen::Vector3d& t,
         Eigen::Matrix3d* t_cov);
@@ -130,6 +135,7 @@ class CrossFrameProcessor {
       far_features_,
       sorted_features_,
       estimation_features_;
+    std::vector<FeatureWithError> features_with_errors_;
     Stereo<std::vector<const uint8_t*>> new_descriptors_;
     Stereo<CudaDeviceVector<const uint8_t*>> new_descriptors_gpu_;
 

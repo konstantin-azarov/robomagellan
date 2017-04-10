@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 f = open("/tmp/trace.txt", "r")
-gt_f = open("/home/konstantin/kitti/dataset/poses/00.txt")
+gt_f = open("/home/konstantin/kitti/dataset/poses/03.txt")
 
 gt_ts = []
 odo_ts = []
@@ -62,14 +62,14 @@ while i < n:
 
     i += 1
 
-#plt.plot(errs)
-#plt.show()
+plt.plot(errs)
+plt.show()
 
     
 
 
 s = 0
-n = 1000
+n = 3000
 
 plot_traj(rebase(odo_ts[s:s+n, :], odo_ts[s]), label="odometry", c="blue")
 plot_traj(rebase(gt_ts[s:s+n, :], gt_ts[s]), label="ground truth", c="green")

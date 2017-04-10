@@ -9,6 +9,8 @@ class Clique {
     Clique() : n_(0) {}
 
     void reset(int n);
+    // Colors must be set before edges are added
+    void setColor(int i, int c);
     void addEdge(int i, int j);
 
     const std::vector<int>& compute();
@@ -23,6 +25,7 @@ class Clique {
     std::vector<int> degrees_;
     std::vector<int> clique_;
     std::vector<int> candidates_[2];
+    std::vector<int> colors_;
     int n_;
 };
 

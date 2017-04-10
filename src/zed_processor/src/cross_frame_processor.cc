@@ -98,11 +98,6 @@ bool CrossFrameProcessor::process(
 
     matchStereo_(scores_l, scores_r);
 
-    if (debug_data != nullptr) {
-      debug_data->tracked_features = tracked_features_;
-      debug_data->new_features = new_features_;
-    }
-
     features_with_matches_.resize(0);
     near_features_.resize(0);
     far_features_.resize(0);
@@ -121,24 +116,56 @@ bool CrossFrameProcessor::process(
     std::cout << "Near = " << near_features_.size() 
               << ", Far = " << far_features_.size() << std::endl;
 
-    estimation_features_.clear();
-
-    buildCliqueNear_();
-    buildCliqueFar_();
-
+    selectInitialEstimationFeatures_();
     std::cout << "Estimation = " << estimation_features_.size() << std::endl;
 
-    fillReprojectionFeatures_();
 
-
-    if (!estimatePose_(r, t, t_cov, debug_data)) {
+    if (!estimatePose_(r, t, t_cov)) {
       valid_estimate = false;
+    }
+
+    if (valid_estimate) {
+      selectFinalEstimationFeatures_();
+      std::cout << "Final = " << estimation_features_.size() << std::endl;
+      valid_estimate = estimatePose_(r, t, t_cov);
     }
   } else {
     valid_estimate = false;
   }
 
+  if (debug_data != nullptr) {
+    debug_data->old_tracked_features = tracked_features_;
+    debug_data->new_tracked_features = new_features_;
+
+    for (auto& f : debug_data->old_tracked_features) {
+      if (f.match != nullptr) {
+        f.match = &debug_data->new_tracked_features[
+          f.match - &debug_data->new_tracked_features.front()];
+      }
+    }
+
+    for (auto& f : debug_data->new_features) {
+      f.match = nullptr;
+    }
+
+    debug_data->near_features.clear();
+    for (auto* f : near_features_) {
+      debug_data->near_features.insert(
+          &debug_data->old_tracked_features[f - &tracked_features_.front()]);
+    }
+
+    debug_data->far_features.clear();
+    for (auto* f : far_features_) {
+      debug_data->far_features.insert(
+          &debug_data->old_tracked_features[f - &tracked_features_.front()]);
+    }
+  }
+
   updateFeatures_(p, r, t);
+
+  if (debug_data != nullptr) {
+    debug_data->new_features = tracked_features_;
+  }
 
   auto t4 = std::chrono::high_resolution_clock::now();
 
@@ -232,28 +259,20 @@ void CrossFrameProcessor::updateFeatures_(
   // update bucket index
   sorted_features_.clear();
 
-  for (int i = 0; i < tracked_features_.size(); ++i) {
-    auto& f = tracked_features_[i];
+  for (int i = 0; i < features_with_errors_.size(); ++i) {
+    auto& f = features_with_errors_[i];
 
-    if (f.match != nullptr) {
-      f.match = nullptr;
-      f.age = std::max(0, f.age) + 1;
-    } else {
-      f.age = std::min(0, f.age) - 1;
-    }
-
-    if (-f.age >= config_.max_feature_missing_frames) {
-      tracked_features_[i] = tracked_features_.back();
-      tracked_features_.pop_back();
-      i--;
+    if (f.err > config_.max_reprojection_error) {
       continue;
     }
 
-    f.w = r_inv * (f.w - t);
-    std::tie(f.left, f.right) = projectPoint(
-        calibration_.intrinsics, f.w);
+    f.f->age = std::max(0, f.f->age) + 1;
 
-    sorted_features_.push_back(&f);
+    f.f->w = r_inv * (f.f->w - t);
+    std::tie(f.f->left, f.f->right) = projectPoint(
+        calibration_.intrinsics, f.f->w);
+
+    sorted_features_.push_back(f.f);
   }
 
   for (auto& f : new_features_) {
@@ -266,7 +285,7 @@ void CrossFrameProcessor::updateFeatures_(
     int hor_idx = f->left.x() / bucket_w;
     int vert_idx = f->left.y() / bucket_h;
     f->bucket_id = vert_idx * config_.x_buckets + hor_idx;
- }
+  }
 
   std::sort(
       std::begin(sorted_features_),
@@ -327,17 +346,71 @@ void CrossFrameProcessor::updateFeatures_(
   std::swap(back_desc_buffer_, tracked_descriptors_);
 }
 
+void CrossFrameProcessor::selectInitialEstimationFeatures_() {
+  estimation_features_.clear();
+  buildCliqueNear_();
+  buildCliqueFar_();
+}
+
+void CrossFrameProcessor::selectFinalEstimationFeatures_() {
+  sorted_features_.clear();
+  for (int i = 0; i < features_with_errors_.size(); ++i) {
+    auto& f = features_with_errors_[i];
+
+    if (f.err <= config_.max_reprojection_error) {
+      sorted_features_.push_back(f.f);
+    }
+  }
+
+  std::sort(
+      std::begin(sorted_features_),
+      std::end(sorted_features_),
+      [](const WorldFeature* a, const WorldFeature* b) {
+        if (a->bucket_id != b->bucket_id) {
+          return a->bucket_id < b->bucket_id;
+        } else if (a->age != b->age) {
+          return a->age > b->age;
+        } else {
+          return a->score > b->score;
+        }
+      });
+
+  estimation_features_.clear();
+  int current_bucket = -1, current_count = 0;
+  for (auto* f : sorted_features_) {
+    if (current_bucket != f->bucket_id) {
+      current_bucket = f->bucket_id;
+      current_count = 0;
+    }
+
+    if (current_count < config_.max_estimation_features_per_bucket) {
+      estimation_features_.push_back(f);
+      current_count++;
+    }
+  }
+}
+
 bool CrossFrameProcessor::isNear_(const WorldFeature& f) const {
   return f.w.z() < config_.near_feature_threshold;
 
 }
 
 bool CrossFrameProcessor::isFar_(const WorldFeature& f) const {
-  float dz = 0.1*60/3.6 * 2000;
-  int cx = calibration_.intrinsics.cx;
-  int cy = calibration_.intrinsics.cy;
+  float dz = 60 / 3.6 * 1000 / 30;   // 60 km/h -> mm/sec -> per frame
+  double dx = 0.1 * dz;
+  double fc = calibration_.intrinsics.f;
+  double cx = calibration_.intrinsics.cx;
+  double cy = calibration_.intrinsics.cy;
+  
+  double z = f.w.z();
 
-  return f.w.z() > dz * std::max(fabs(f.left.x() - cx), fabs(f.right.y() - cy));
+  double u1 = fc * f.w.x() / (z - dz) + cx;
+  double v1 = fc * f.w.y() / (z - dz) + cy;
+  double u2 = fc * (f.w.x() + dx) / z + cx;
+  double v2 = fc * (f.w.y() + dx) / z + cy;
+
+  return fabs(f.left.x() - u1) < 2 && fabs(f.left.y() - v1) < 2 &&
+         fabs(f.left.x() - u2) < 2 && fabs(f.left.y() - v2) < 2;
 };
 
 void CrossFrameProcessor::buildCliqueNear_() {
@@ -352,6 +425,10 @@ void CrossFrameProcessor::buildCliqueNear_() {
   }
 
   clique_.reset(n);
+
+  for (int i = 0; i < n; ++i) {
+    clique_.setColor(i, near_features_[i]->bucket_id);
+  }
 
   for (int i = 0; i < n; ++i) {
     auto* m1 = near_features_[i];
@@ -384,6 +461,10 @@ void CrossFrameProcessor::buildCliqueFar_() {
   }
 
   clique_.reset(n);
+
+  for (int i = 0; i < n; ++i) {
+    clique_.setColor(i, far_features_[i]->bucket_id);
+  }
 
   for (int i = 0; i < n; ++i) {
     auto* m1 = far_features_[i];
@@ -455,91 +536,50 @@ void CrossFrameProcessor::fillReprojectionFeatures_() {
     << std::endl;
 }
 
-/* double CrossFrameProcessor::fillReprojectionErrors_( */
-/*     const Eigen::Quaterniond& r, */ 
-/*     const Eigen::Vector3d& tm, */
-/*     std::vector<ReprojectionFeatureWithError>& reprojection_features) { */
-/*   double total = 0; */
+double CrossFrameProcessor::fillReprojectionErrors_(
+    const Eigen::Quaterniond& r, 
+    const Eigen::Vector3d& tm) {
+  double total = 0;
 
-/*   for (auto& f : reprojection_features) { */
-/*     auto p1 = projectPoint(calibration_.intrinsics, r.inverse()*(f.r2 - tm)); */
-/*     auto p2 = projectPoint(calibration_.intrinsics, r*f.r1 + tm); */
+  features_with_errors_.clear();
 
-/*     double e1 = (p1.first - f.s1l).squaredNorm() + */ 
-/*       (p1.second - f.s1r).squaredNorm(); */ 
-/*     double e2 = (p2.first - f.s2l).squaredNorm() + */ 
-/*       (p2.second - f.s2r).squaredNorm(); */
+  auto ri = r.inverse();
 
-/*     f.error = e1 + e2; */
-/*     total += e1 + e2; */
-/*   } */
+  for (auto* f : features_with_matches_) {
+    auto p1 = projectPoint(calibration_.intrinsics, r*f->match->w + tm);
+    auto p2 = projectPoint(calibration_.intrinsics, ri*(f->w - tm)); 
 
-/*   return total / reprojection_features.size(); */
-/* } */
+    double e1 = (p1.first - f->left).squaredNorm() + 
+      (p1.second - f->right).squaredNorm(); 
+    double e2 = (p2.first - f->match->left).squaredNorm() + 
+      (p2.second - f->match->right).squaredNorm();
+    
+    features_with_errors_.push_back(FeatureWithError {f, e1 + e2});
+  }
+
+  return 0;
+}
+
+
 
 bool CrossFrameProcessor::estimatePose_(
     Eigen::Quaterniond& r, 
     Eigen::Vector3d& t,
-    Eigen::Matrix3d* t_cov, 
-    CrossFrameDebugData* debug_data) {
-
-  double reprojection_error;
+    Eigen::Matrix3d* t_cov) {
 
   t.setZero();
   r.setIdentity();
 
-  estimateOne_(reprojection_features_, r, t, t_cov);
+  if (estimation_features_.size() < config_.min_features_for_estimation) {
+    features_with_errors_.clear();
+    return false;
+  }
+
+  fillReprojectionFeatures_();
+  reprojection_estimator_.estimate(reprojection_features_, r, t, t_cov);
+  fillReprojectionErrors_(r, t);
 
   // xcxc
   return true;
 
-  /* for (int i=0; i < 10; ++ i) { */
-  /*   if (i > 0 || !use_initial_estimate) { */
-  /*     estimateOne_(filtered_reprojection_features_, r, t, t_cov); */
-
-  /*     reprojection_error = fillReprojectionErrors_( */
-  /*         r, t, */
-  /*         filtered_reprojection_features_); */
-      
-  /*     if (debug_data != nullptr) { */
-  /*       debug_data->reprojection_features.push_back( */
-  /*           filtered_reprojection_features_); */
-  /*       debug_data->pose_estimations.push_back(Eigen::Translation3d(t)*r); */
-  /*     } */
-  /*   } */
-
-  /*   fillReprojectionErrors_(r, t, all_reprojection_features_); */
-
-  /*   std::cout << "Step " << i << ":" */ 
-  /*     << " features = " << filtered_reprojection_features_.size() */
-  /*     << " err = " << reprojection_error */
-  /*     << std::endl; */
-
-  /*   filtered_reprojection_features_.clear(); */
-  /*   for (const auto& f : all_reprojection_features_) { */
-  /*     if (f.error < config_.inlier_threshold) { */
-  /*       filtered_reprojection_features_.push_back(f); */
-  /*     } */
-  /*   } */
-  /* } */
-
-
-  /* bool success = reprojection_error < 5.0; */
-  /* if (!success) { */
-  /*   std::cout << "Failure: " << reprojection_error << std::endl; */
-  /* } */
-  /* return success; */
-}
-
-void CrossFrameProcessor::estimateOne_(
-    const std::vector<StereoReprojectionFeature>& features,
-    Eigen::Quaterniond& r, 
-    Eigen::Vector3d& t,
-    Eigen::Matrix3d* t_cov) {
-  if (features.size() < 5) {
-    std::cout << "WARNING: not enough features" << std::endl;
-    return;
-  }
-
-  reprojection_estimator_.estimate(features, r, t, t_cov);
 }

@@ -189,9 +189,8 @@ int main(int argc, char** argv) {
     trace.open(path_trace_file.c_str(), ios::out);
   }
 
-  e::Quaterniond d_r;
-  e::Vector3d d_t;
-  double speed = 60*0.1/3.6*1000;
+  e::Quaterniond d_r, d_r_prev(1, 0, 0, 0);
+  e::Vector3d d_t, d_t_prev(0, 0, 0);
 
   bool done = false;
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
@@ -228,7 +227,7 @@ int main(int argc, char** argv) {
     }
  
     bool ok = false;
-  
+ 
     e::Matrix3d t_cov;
     ok = cross_processor.process(
         cur_frame, 
@@ -240,18 +239,26 @@ int main(int argc, char** argv) {
 
     if (ok) {
       double e2 = t_cov.trace();
-      if (e2 > 0.02*0.02*speed*speed && e2 > 25) {
+      double sigma = sqrt(e2);
+      double d = d_t.norm();
+      if (3 * sigma > d * 0.2) {
         std::cout << "FAIL";
         std::cout << "T_cov = " << t_cov << std::endl; 
         std::cout << "t = " << d_t << std::endl;
-        std::cout << "speed = " << speed << std::endl;
+        std::cout << "speed = " << d << std::endl;
         ok = false;
+
+        cam_t += cam_r*d_t_prev;
+        cam_r = cam_r*d_r_prev;
+        
       } else {
         cam_t += cam_r*d_t;
         cam_r = cam_r*d_r;
-        cam_r.normalize();
+
+        d_r_prev = d_r;
+        d_t_prev = d_t;
       }
-      speed = d_t.norm();
+      cam_r.normalize();
       
       auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI;
       std::cout << "yaw = " << ypr.x() 
@@ -283,11 +290,11 @@ int main(int argc, char** argv) {
     }
     std::cout << "Times: " << timer.str() << std::endl;
 
-    if (debug == 2 || (debug == 1 && !ok)) {
-
+    if (frame_index > 0 && (debug == 2 || (debug == 1 && !ok))) {
       std::unique_ptr<DebugRenderer> renderer(DebugRenderer::create(
           calib,
           frame_data[cur_index],
+          frame_debug_data[1 - cur_index],
           frame_debug_data[cur_index],
           cross_frame_debug_data,
           ground_truth.empty() ? nullptr : &gt_d,

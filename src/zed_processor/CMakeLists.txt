@@ -240,13 +240,24 @@ catkin_add_gtest(
 target_link_libraries(
   reprojection_estimator_test
   reprojection_estimator)
+  
+add_library(
+  clique
+  src/clique.cc)
+
+catkin_add_gtest(
+  clique_test
+  src/clique_test.cc)
+
+target_link_libraries(
+  clique_test
+  clique)
 
 add_executable(
   process
   src/process.cc
   src/bag_video_reader.cc
   src/calibration_data.cc
-  src/clique.cc
   src/cross_frame_processor.cc
   src/debug_renderer.cc
   src/direction_target.cc
@@ -260,6 +271,7 @@ add_executable(
 
 target_link_libraries(
   process
+  clique
   descriptor_tools
   math3d
   reprojection_estimator

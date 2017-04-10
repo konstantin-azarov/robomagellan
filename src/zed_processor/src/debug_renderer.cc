@@ -20,24 +20,25 @@ class DebugRendererImpl : public DebugRenderer {
     DebugRendererImpl(
         const StereoCalibrationData& calib,
         const FrameData& f,
-        const FrameDebugData& fd,
+        const FrameDebugData& fd_prev, const FrameDebugData& fd_cur,
         const CrossFrameDebugData& cfd,
         const Eigen::Affine3d* ground_truth,
         int max_width, int max_height) :
         calib_(calib), 
         frame_data_(f),
-        frame_debug_data_(fd),
+        fd_prev_(fd_prev),
+        fd_cur_(fd_cur),
         cross_frame_debug_data_(cfd),
         ground_truth_(ground_truth) {
-      w_ = fd.undistorted_image[0].cols;
-      h_ = fd.undistorted_image[0].rows;
+      w_ = fd_prev.undistorted_image[0].cols;
+      h_ = fd_prev.undistorted_image[0].rows;
 
       scale_ = 1.0;
       if (2*w_ > max_width) {
         scale_ = max_width/(2.0*w_);
       }
 
-      if (h_ > max_height) {
+      if (2*h_ > max_height) {
         scale_ = std::min(scale_, max_height/(2.0*h_));
       }
     }
@@ -45,10 +46,12 @@ class DebugRendererImpl : public DebugRenderer {
     virtual bool loop() {
       bool done = false,
            next_frame = false;
+      int features_mode = 0; // 0 - none, 1 - all, 2 - matched
 
       while (!done) {
         renderStereo_();
-        
+        renderFeatures_(features_mode);
+       
         cv::Mat scaled_image;
         cv::resize(img_, scaled_image, cv::Size(), scale_, scale_);
         cv::imshow("debug", scaled_image);
@@ -58,6 +61,9 @@ class DebugRendererImpl : public DebugRenderer {
           key &= 0xFF;
         }
         switch(key) {
+          case 'f':
+            features_mode = (features_mode + 1) % 3;
+            break;
           case 'n':
             next_frame = true;
             done = true;
@@ -75,10 +81,40 @@ class DebugRendererImpl : public DebugRenderer {
     void renderStereo_() {
       img_.create(2*h_, 2*w_, CV_8UC3);
   
-      auto* imgs = frame_debug_data_.undistorted_image;
-
+      auto* imgs = fd_prev_.undistorted_image;
       renderImage_(imgs[0], img_(cv::Range(0, h_), cv::Range(0, w_)));
       renderImage_(imgs[1], img_(cv::Range(0, h_), cv::Range(w_, 2*w_)));
+
+      imgs = fd_cur_.undistorted_image;
+      renderImage_(imgs[0], img_(cv::Range(h_, 2*h_), cv::Range(0, w_)));
+      renderImage_(imgs[1], img_(cv::Range(h_, 2*h_), cv::Range(w_, 2*w_)));
+    }
+
+    void renderFeatures_(int mode) {
+      if (mode == 0) {
+        return;
+      }
+
+      for (const auto& f : cross_frame_debug_data_.old_tracked_features) {
+        if (mode == 2 && f.match == nullptr) {
+          continue; 
+        }
+
+        auto p = projectPoint(calib_.intrinsics, f.w);
+
+        cv::Scalar color;
+
+        if (cross_frame_debug_data_.near_features.count(&f)) {
+          color = cv::Scalar(0, 255, 0);
+        } else if (cross_frame_debug_data_.far_features.count(&f)) {
+          color = cv::Scalar(255, 0, 0);
+        } else {
+          color = cv::Scalar(0, 0, 255);
+        }
+
+        renderCross_(p.first.x(), p.second.y(), color);
+        renderCross_(p.second.x() + w_, p.second.y(), color);
+      }
     }
 
     void renderImage_(const cv::Mat& src, const cv::Mat& dest) {
@@ -88,6 +124,11 @@ class DebugRendererImpl : public DebugRenderer {
       cv::resize(tmp, dest, dest.size());
     }
 
+    void renderCross_(double x, double y, cv::Scalar color) {
+      cv::line(img_, cv::Point(x - 5, y), cv::Point(x + 5, y), color);
+      cv::line(img_, cv::Point(x, y - 5), cv::Point(x, y + 5), color);
+    }
+
   private:
     double scale_;
     int w_, h_;
@@ -95,7 +136,7 @@ class DebugRendererImpl : public DebugRenderer {
     const StereoCalibrationData& calib_;
 
     const FrameData& frame_data_;
-    const FrameDebugData& frame_debug_data_;
+    const FrameDebugData& fd_prev_, fd_cur_;
     const CrossFrameDebugData& cross_frame_debug_data_;
 
     const Eigen::Affine3d* ground_truth_;
@@ -107,12 +148,12 @@ class DebugRendererImpl : public DebugRenderer {
 DebugRenderer* DebugRenderer::create(
     const StereoCalibrationData& calib,
     const FrameData& f,
-    const FrameDebugData& fd,
+    const FrameDebugData& fd_prev, const FrameDebugData& fd_cur,
     const CrossFrameDebugData& cfd,
     const Eigen::Affine3d* ground_truth_t, 
     int max_width, int max_height) {
   return new DebugRendererImpl(
-      calib, f, fd, cfd, ground_truth_t, max_width, max_height);
+      calib, f, fd_prev, fd_cur, cfd, ground_truth_t, max_width, max_height);
 }
 
 #if 0

@@ -16,7 +16,8 @@ class DebugRenderer {
     static DebugRenderer* create(
         const StereoCalibrationData& calib,
         const FrameData& f,
-        const FrameDebugData& fd,
+        const FrameDebugData& fd_prev,
+        const FrameDebugData& fd_cur, 
         const CrossFrameDebugData& cfd,
         const Eigen::Affine3d* ground_truth_t, 
         int max_width, int max_height);
