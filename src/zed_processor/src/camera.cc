@@ -118,47 +118,18 @@ bool Camera::init(int width, int height, int fps) {
     return false;
   }
 
-  /* std::cout << "SetAE = " << uvc_strerror(uvc_set_ae_mode(devh_, 2)) << std::endl; /1* e.g., turn on auto exposure *1/ */
-  /* std::cout << "SetAEP = " << uvc_strerror(uvc_set_ae_priority(devh_, 0)) << std::endl; */
-  
-  /* uint8_t ae_mode; */
-  /* auto err = uvc_get_ae_mode(devh_, &ae_mode, UVC_GET_CUR); */
-  /* std::cout << "AE = " << err << " xcxc " << (int)ae_mode << std::endl; */
 
   return true;
 }
 
-#define PARAM_ACCESSOR(type, name, uvc_func) \
-  type Camera::get##name() { \
-    type res; \
-    auto err = uvc_get_##uvc_func(devh_, &res, UVC_GET_CUR); \
-    if (err != 0) { \
-      std::cout << "Cannot get " #name << ": " << uvc_strerror(err) << std::endl; \
-      return -1; \
-    } \
-    return res; \
-  } \
-\
-  void Camera::get##name##Limits(type& minV, type& maxV) { \
-    if (uvc_get_##uvc_func(devh_, &minV, UVC_GET_MIN) < 0) \
-      minV = -1; \
-    if (uvc_get_##uvc_func(devh_, &maxV, UVC_GET_MAX) < 0) \
-      maxV = -1; \
-  } \
-\
-  void Camera::set##name(type value) { \
-    auto err = uvc_set_##uvc_func(devh_, value); \
-    if (err != 0) { \
-      std::cout << "Setting " #name " failed: " << uvc_strerror(err) << std::endl; \
-    } \
-  } 
+void Camera::setExposure(int v) {
+  uint8_t cmd[64] = { 0x07, 0x24, 0x01, 0x00, (v >> 8) & 0xFF, v & 0xFF, 0x00 };
 
-//PARAM_ACCESSOR(uint32_t, Exposure, exposure_abs);
-//PARAM_ACCESSOR(uint16_t, Iris, iris_abs);
-//PARAM_ACCESSOR(uint16_t, Focus, focus_abs);
-//PARAM_ACCESSOR(uint16_t, Gain, gain);
+  uvc_set_ctrl(devh_, 0x03, 0x02, cmd, sizeof(cmd));
 
-#undef PARAM_ACCESSOR
+  cmd[2] = 0x02;
+  uvc_set_ctrl(devh_, 0x03, 0x02, cmd, sizeof(cmd));
+}
 
 void Camera::shutdown() {
   /* End the stream. Blocks until last callback is serviced */
@@ -191,24 +162,11 @@ void Camera::callback(uvc_frame_t* frame) {
   uint8_t* right_data = tmp_buffer_ + frame_width_;
 
   frame_counter_++;
-//  if (frame_counter_ % 2 == 0) {
-//    return;
-//  }
 
   if (frame->data_bytes != frame_width_*frame_height_*2) {
     cerr << "Incomplete frame: " << frame->sequence << " " << frame->data_bytes << endl;
     return;
   }
-
-//  for (int i = 0; i < frame_height_; ++i) {
-//    for (int j = 0; j < frame_width_; ++j) {
-//      *(left_data++) = *(data++);
-//      *(right_data++) = *(data++);
-//    }
-//    left_data += frame_width_;
-//    right_data += frame_width_;
-//  }
-
 
   if (frame_counter_ != frame->sequence) {
     cerr << "Missed frame(s): "

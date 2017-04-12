@@ -131,20 +131,8 @@ int main(int argc, char **argv) {
   }
 #endif
  
-#define SHOW_PARAM(name) \
-  auto cur##name = camera.get##name(); \
-  decltype(cur##name) min##name, max##name; \
-  camera.get##name##Limits(min##name, max##name); \
-  std::cout << #name \
-      << ": min = " << min##name \
-      << " max = " << max##name \
-      << " cur = " << cur##name \
-      << std::endl;
-
-//  SHOW_PARAM(Gain);
-//  SHOW_PARAM(Exposure);
-//
-  int minExposure, maxExposure, curExposure;
+  int minExposure = 1, maxExposure = 30000, curExposure = 10000;
+  camera.setExposure(curExposure);
 
   cout << "Ready" << endl;
 
@@ -225,13 +213,13 @@ int main(int argc, char **argv) {
       case '+':
         curExposure = min(maxExposure, curExposure + (key == '=' ? 50 : 1000));
         cout << "Exposure: cur = " << curExposure << endl;
-//        camera.setExposure(curExposure);
+        camera.setExposure(curExposure);
         break;
       case '-':
       case '_':
         curExposure = max(minExposure, curExposure - (key == '-' ? 50 : 1000));
         cout << "Exposure: cur = " << curExposure << endl;
-//        camera.setExposure(curExposure);
+        camera.setExposure(curExposure);
         break;
       case 226:
         break; // shift
@@ -243,8 +231,6 @@ int main(int argc, char **argv) {
     }
 #endif
   }
-
-  cout << endl;
 
   close_video_sink(video_format, video_sink);
   camera.shutdown();
