@@ -24,18 +24,14 @@ class TrexDriver {
         : port_(io_), timeout_(boost::posix_time::milliseconds(timeout_ms)) {
       port_.open(port_name);
       port_.set_option(asio::serial_port_base::baud_rate(19200));
-      /* port_.set_option( */
-      /*     asio::serial_port_base::stop_bits( */
-      /*       asio::serial_port_base::stop_bits::one)); */
-      /* port_.set_option( */
-      /*     asio::serial_port_base::parity(asio::serial_port_base::parity::none)); */
-      /* port_.set_option( */
-      /*     asio::serial_port_base::flow_control( */
-      /*       asio::serial_port_base::flow_control::none)); */
-      /* port_.set_option( */
-      /*     asio::serial_port_base::character_size(8)); */
-
-      ROS_INFO("Is open: %d", port_.is_open());
+      port_.set_option(
+          asio::serial_port_base::stop_bits(
+            asio::serial_port_base::stop_bits::one));
+      port_.set_option(
+          asio::serial_port_base::parity(asio::serial_port_base::parity::none));
+      port_.set_option(
+          asio::serial_port_base::flow_control(
+            asio::serial_port_base::flow_control::none));
 
       std::string signature(reinterpret_cast<char*>(command<7>(0x81).data()));
       
@@ -106,34 +102,33 @@ class TrexDriver {
 
     template <int N, int M>
     boost::array<uint8_t, N> command(boost::array<uint8_t, M> cmd) {
- //     boost::array<uint8_t, M> echo;
+      boost::array<uint8_t, M> echo;
       boost::array<uint8_t, N> response;
 
       boost::system::error_code error_code;
 
       io_.reset();
 
-      /* asio::deadline_timer timer(io_); */
+      asio::deadline_timer timer(io_);
 
       boost::asio::write(port_, boost::asio::buffer(cmd));
-      timespec ts = { 0, 1000*1000*20 } ;
-      nanosleep(&ts, nullptr);
-      /* boost::asio::read(port_, boost::asio::buffer(response)); */
       boost::asio::async_read(
           port_, 
-          boost::asio::buffer(response),
+          boost::array<asio::mutable_buffer, 2> { 
+            boost::asio::buffer(echo), 
+            boost::asio::buffer(response) },
           [&](
             const boost::system::error_code& error, 
             std::size_t n_bytes) {
               error_code.assign(error.value(), error.category());
-              /* timer.cancel(); */
+              timer.cancel();
             });
 
-      /* timer.expires_from_now(timeout_); */
-      /* timer.async_wait( */
-      /*     [&](const boost::system::error_code& error) { */
-      /*       port_.cancel(); */
-      /*     }); */
+      timer.expires_from_now(timeout_);
+      timer.async_wait(
+          [&](const boost::system::error_code& error) {
+            port_.cancel();
+          });
 
       io_.run();
 
@@ -142,9 +137,9 @@ class TrexDriver {
                 "Read from controller failed: %1%") % error_code.message()));
       }
 
-      /* if (echo != cmd) { */
-      /*   throw TrexException("Invalid echo received from the controller"); */
-      /* } */
+      if (echo != cmd) {
+        throw TrexException("Invalid echo received from the controller");
+      }
 
       return response;
     }
