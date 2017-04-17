@@ -32,16 +32,16 @@ class Controller {
           p_(e::Vector3f(
                 node.param("k_v", 0.5),
                 node.param("k_v", 0.5),
-                node.param("b_v", 1E-3)).asDiagonal()),
+                node.param("b_v", 0.5)).asDiagonal()),
           odometry_sub_(node.subscribe(
-                "odometry", 50, &Controller::receiveOdometry, this)),
+                "/odometry", 50, &Controller::receiveOdometry, this)),
           control_sub_(node.subscribe(
-                "control", 50, &Controller::receiveCommand, this)),
-          twist_pub_(node.advertise<geometry_msgs::Twist>("twist", 10)),
+                "/control", 50, &Controller::receiveCommand, this)),
+          twist_pub_(node.advertise<geometry_msgs::Twist>("/twist", 10)),
           command_pub_(
-              node.advertise<trex_dmc01::SetMotors>("motors", 10)),
+              node.advertise<trex_dmc01::SetMotors>("/motors", 10)),
           params_pub_(
-              node.advertise<controller::Parameters>("parameters", 10)) {
+              node.advertise<controller::Parameters>("/parameters", 10)) {
     }
 
     void receiveOdometry(const geometry_msgs::PoseStamped::ConstPtr& pose_msg) {
@@ -159,9 +159,9 @@ class Controller {
 
 int main(int argc, char** argv) {
 
-  ros::init(argc, argv, "robomagellan_controller");
+  ros::init(argc, argv, "controller");
 
-  ros::NodeHandle node;
+  ros::NodeHandle node("controller");
   
   Controller controller(node);
 

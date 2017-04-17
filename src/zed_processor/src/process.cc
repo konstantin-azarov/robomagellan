@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
       ("total-frames",
        po::value<int>(&frame_count)->default_value(0),
        "number of frames to process")
-      ("calib-file",
+      ("stereo-calib-file",
        po::value<string>(&calib_file),
        "path to the calibration file")
       ("mono-calib-file",
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
       exit(1);
     }
     raw_calib = RawStereoCalibrationData::read(calib_file);
-    rdr.reset(new BagVideoReader(video_file, "/image_raw"));
+    rdr.reset(new BagVideoReader(video_file, "image_raw"));
   } else {
     auto kitti_reader = new KittiVideoReader(
         kitti_basedir + "/sequences/" + kitti_dataset);

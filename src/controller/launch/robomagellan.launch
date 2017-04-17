@@ -2,7 +2,11 @@
   <node pkg="controller" 
         name="controller" 
         type="controller"
-        output="screen"/>
+        output="screen">
+      <param name="k_l" value="1.2"/>
+      <param name="k_r" value="1.2"/>
+      <param name="b" value="0.4"/>
+  </node>
   <node pkg="unity_glue" 
         name="unity_glue" 
         type="unity_glue.py"
