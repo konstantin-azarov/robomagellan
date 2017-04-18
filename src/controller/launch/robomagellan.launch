@@ -11,5 +11,6 @@
         name="unity_glue" 
         type="unity_glue.py"
         respawn="true"
-        respawn_delay="10"/>
+        respawn_delay="10"
+        output="screen"/>
 </launch>

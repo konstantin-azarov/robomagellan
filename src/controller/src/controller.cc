@@ -1,7 +1,7 @@
 #include <Eigen/Geometry>
 
 #include "ros/ros.h"
-#include "geometry_msgs/PoseStamped.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "geometry_msgs/Twist.h"
 
 #include "trex_dmc01/SetMotors.h"
@@ -44,8 +44,9 @@ class Controller {
               node.advertise<controller::Parameters>("/parameters", 10)) {
     }
 
-    void receiveOdometry(const geometry_msgs::PoseStamped::ConstPtr& pose_msg) {
-      const auto& pose = pose_msg->pose;
+    void receiveOdometry(
+        const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose_msg) {
+      const auto& pose = pose_msg->pose.pose;
 
       e::Vector3d pos(pose.position.x, pose.position.y, pose.position.z);
       auto t = pose_msg->header.stamp;
@@ -58,7 +59,7 @@ class Controller {
         double s = sqrt(1 - pose.orientation.w * pose.orientation.w);
 
         double yaw_r =  
-          s > 1E-5 ? (angle * pose_msg->pose.orientation.y / s) / dt : 0;
+          s > 1E-5 ? (angle * pose.orientation.y / s) / dt : 0;
 
         updateFilter_(speed, 0.1, yaw_r, 0.02);
         updateControl_();

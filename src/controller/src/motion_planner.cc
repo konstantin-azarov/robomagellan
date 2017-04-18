@@ -5,7 +5,7 @@
 #include "ros/ros.h"
 #include "tf/transform_broadcaster.h"
 
-#include "geometry_msgs/PoseStamped.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "geometry_msgs/Twist.h"
 #include "nav_msgs/Path.h"
 #include "std_msgs/Empty.h" 
@@ -18,7 +18,15 @@ const double kLookAheadMin = 2;
 const double kSpeedMax = 1;
 const double kTurnRateMax = 30 * M_PI/180;
 const double kAccelerationMax = 0.5;
-const double kFinalDistanceThreshold = 0.1;
+const double kFinalDistanceThreshold = 0.15;
+
+const double kSpeedFilterTimeConstant = 1;
+
+const double kMaxConeGap = 0.5;
+const double kMinConeAge = 2;
+const double kConeLockDist = 5;
+const double kConeExpectedDist = 25;
+const double kConeFilterTimeConst = 5;
 
 class MotionPlanner {
   public:
@@ -29,12 +37,16 @@ class MotionPlanner {
             "path", 10, &MotionPlanner::receivePath, this)),
         odometry_sub_(node.subscribe(
             "odometry", 10, &MotionPlanner::receiveOdometry, this)),
+        cone_sub_(node.subscribe(
+            "cone", 10, &MotionPlanner::receiveCone, this)),
         cmd_pub_(
             node.advertise<geometry_msgs::Twist>("control", 10)),
         robot_pose_pub_(
             node.advertise<geometry_msgs::PoseStamped>("estimated_pose", 10)),
         target_point_pub_(
             node.advertise<geometry_msgs::PoseStamped>("target_point", 10)),
+        cone_pose_pub_(
+            node.advertise<geometry_msgs::PoseStamped>("cone_estimate", 10)),
         pos_(0, 0, 0),
         heartbeat_time_(0) {
       map_transform_.setOrigin(tf::Vector3(0, 0, 0));
@@ -44,6 +56,9 @@ class MotionPlanner {
       camera_to_robot_ = 
         e::AngleAxisd(-M_PI/2, e::Vector3d(0, 1, 0)) * 
         e::AngleAxisd(M_PI/2, e::Vector3d(1, 0, 0)); 
+
+      speed_.setZero();
+      turn_rate_.setZero();
     }
 
     void receivePath(const nav_msgs::Path::ConstPtr& path_msg) {
@@ -52,14 +67,16 @@ class MotionPlanner {
         path_.push_back(e::Vector2d(p.pose.position.x, p.pose.position.y)); 
       }
       current_segment_ = 0;
+      locked_to_cone_ = false;
     }
     
-    void receiveOdometry(const geometry_msgs::PoseStamped::ConstPtr& pose_msg) {
+    void receiveOdometry(
+        const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose_msg) {
       auto time = ros::Time::now();
       double dt = (pose_msg->header.stamp - last_update_).toSec();
       last_update_ = pose_msg->header.stamp;
 
-      const auto& pose = pose_msg->pose;
+      const auto& pose = pose_msg->pose.pose;
       e::Vector3d dp(pose.position.x, pose.position.y, pose.position.z);
 
       if (pose_msg->header.frame_id != "invalid") {
@@ -69,12 +86,30 @@ class MotionPlanner {
             pose.orientation.y,
             pose.orientation.z);
 
-        pos_ += rot_ * dp;
+        auto dp_w = rot_ * dp;
+        e::AngleAxisd aa(dr);
+        auto omega_w = rot_ * (aa.axis() * aa.angle() / dt);
+        double alpha = 1 - exp(-dt/kSpeedFilterTimeConstant);
+
+        speed_ += alpha * (dp_w/dt - speed_);
+        turn_rate_ += alpha * (omega_w - turn_rate_);
+
+        /* ROS_INFO("S = (%f, %f, %f)", speed_.x(), speed_.y(), speed_.z()); */
+        /* ROS_INFO("W = (%f, %f, %f)", */ 
+        /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
+
+        pos_ += dp_w;
         rot_ = rot_ * dr;
         rot_.normalize();
       } else {
         if (dt > 0) {
-          // xcxc
+          /* ROS_INFO("Interpolate (%f, %f, %f) (%f, %f, %f)", */
+          /*     speed_.x(), speed_.y(), speed_.z(), */
+          /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
+
+          e::AngleAxisd aa_w(turn_rate_.norm()*dt, turn_rate_.normalized());
+          pos_ += speed_ * dt;
+          rot_ = aa_w * rot_;
         }
       }
 
@@ -85,22 +120,35 @@ class MotionPlanner {
       e::Vector2d target_point;
 
       if (path_.size() > 0 && current_segment_ <= path_.size() - 1 && dt > 0) {
-         e::Vector2d target_point, target_dir;
+        e::Vector2d target_point, target_dir;
+        e::Vector2d pos2d(pos_.x(), pos_.y());
 
-        if (current_segment_ < path_.size() - 1) {
-          double t;
-          pointSegmentDistance(
-              e::Vector2d(pos_.x(), pos_.y()),
-              path_[current_segment_],
-              path_[current_segment_ + 1],
-              t);
+        bool to_cone = locked_to_cone_ || 
+          (validCone() && (cone_position_ - path_.back()).norm() < kConeExpectedDist);
 
-          double lookahead = std::max(kLookAheadMin, kLookAheadSecs * v);
-          target_point = lookaheadPoint(
-              current_segment_, t, lookahead, target_dir);
+        if (to_cone && (cone_position_ - pos2d).norm() < kConeLockDist) {
+          locked_to_cone_ = true;
+        }
+
+        if (to_cone) {
+          target_point = cone_position_;
+          target_dir = (cone_position_ - e::Vector2d(pos_.x(), pos_.y())).normalized();
         } else {
-          target_point = path_.back();
-          target_dir = (path_.back() - path_[path_.size() - 2]).normalized();
+          if (current_segment_ < path_.size() - 1) {
+            double t;
+            pointSegmentDistance(
+                e::Vector2d(pos_.x(), pos_.y()),
+                path_[current_segment_],
+                path_[current_segment_ + 1],
+                t);
+
+            double lookahead = std::max(kLookAheadMin, kLookAheadSecs * v);
+            target_point = lookaheadPoint(
+                current_segment_, t, lookahead, target_dir);
+          } else {
+            target_point = path_.back();
+            target_dir = (path_.back() - path_[path_.size() - 2]).normalized();
+          }
         }
 
         publishPose_(
@@ -110,14 +158,13 @@ class MotionPlanner {
               atan2(target_dir.y(), target_dir.x()), e::Vector3d(0, 0, 1))));
 
         navigateToPoint(
-            target_point, current_segment_ == path_.size() - 1, 
+            target_point, 
+            (current_segment_ == path_.size() - 1) || to_cone, 
             cmd_vel, cmd_turn);
 
         if (cmd_vel > v) {
           cmd_vel = std::min(v + kAccelerationMax*dt, cmd_vel);
-        } else {
-          //cmd_vel = std::max(v - kAccelerationMax*dt, cmd_vel);
-        }
+        } 
       }
 
       if ((ros::Time::now() - heartbeat_time_).toSec() < kHeartbeatTimeout) {
@@ -132,8 +179,53 @@ class MotionPlanner {
 
       publishPose_(robot_pose_pub_, time, pos_, rot_ * camera_to_robot_);
 
+      if (validCone()) {
+        publishPose_(
+            cone_pose_pub_, time, 
+            e::Vector3d(cone_position_.x(), cone_position_.y(), 0), 
+            e::Quaterniond::Identity());
+      }
+
       tf_broadcaster_.sendTransform(
-          tf::StampedTransform(map_transform_, ros::Time::now(), "world", "map"));
+          tf::StampedTransform(
+            map_transform_, ros::Time::now(), "world", "map"));
+    }
+
+    bool validCone() {
+      auto t = ros::Time::now();
+      return last_cone_timestamp_.isValid() &&
+          (t - last_cone_timestamp_).toSec() < kMaxConeGap &&
+          (t - first_cone_timestamp_).toSec() > kMinConeAge;
+    }
+
+    void receiveCone(
+        const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose_msg) {
+      const auto& pos = pose_msg->pose.pose.position;
+      auto d = rot_*e::Vector3d(pos.x, pos.y, pos.z);
+
+      auto cur_cone_pos = e::Vector2d(
+          pos_.x() + d.x(),
+          pos_.y() + d.y());
+
+
+      auto t = ros::Time::now();
+      if (t > last_cone_timestamp_ + ros::Duration(kMaxConeGap)) {
+        last_cone_timestamp_ = first_cone_timestamp_ = t;
+        cone_position_ = cur_cone_pos;
+      } else {
+        double dt = (t - last_cone_timestamp_).toSec();
+        last_cone_timestamp_ = t;
+
+        double alpha = (1 - exp(-dt/kConeFilterTimeConst));
+
+        cone_position_ += alpha * (
+            cur_cone_pos - cone_position_);
+
+        /* ROS_INFO("Cone: %f (%f, %f) (%f, %f)", */ 
+        /*     alpha, */ 
+        /*     cone_position_.x(), cone_position_.y(), */
+        /*     cur_cone_pos.x(), cur_cone_pos.y()); */
+      }
     }
 
     void publishPose_(
@@ -179,7 +271,7 @@ class MotionPlanner {
 
       if (final_point) {
         double dist = p12.norm();
-      
+
         if (dist > kFinalDistanceThreshold) {
           v = std::min(v, sqrt(2 * dist * kAccelerationMax));
         } else {
@@ -239,13 +331,19 @@ class MotionPlanner {
     }
 
   private:
-    ros::Subscriber path_sub_, odometry_sub_, heartbeat_sub_;   
-    ros::Publisher cmd_pub_, robot_pose_pub_, target_point_pub_;
+    ros::Subscriber path_sub_, odometry_sub_, heartbeat_sub_, cone_sub_;   
+    ros::Publisher cmd_pub_, robot_pose_pub_, target_point_pub_, cone_pose_pub_;
     std::vector<e::Vector2d> path_;
   
     // Current position and orientation
     e::Vector3d pos_;
     e::Quaterniond rot_, camera_to_robot_;
+    e::Vector3d speed_, turn_rate_;
+
+    // Current cone position and orientation
+    e::Vector2d cone_position_;
+    ros::Time last_cone_timestamp_, first_cone_timestamp_;
+    bool locked_to_cone_;
 
     int current_segment_;
 

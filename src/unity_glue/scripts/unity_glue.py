@@ -9,9 +9,11 @@ import roslib
 import rospy
 import rostopic
 
+import json
 import yaml
 
 from trex_dmc01.msg import SetMotors
+from nav_msgs.msg import Path
 
 class UnityGlueException(Exception):
     pass
@@ -70,6 +72,18 @@ def set_motors_callback(command):
             "Robot", "SetSpeedCommand", 
             "%f %f" % (command.left / 127.0, command.right / 127.0))
 
+def path_callback(path):
+    path_struct = []
+    for p in path.poses:
+        path_struct.append({
+            'x': p.pose.position.x,
+            'z': p.pose.position.y
+        })
+
+    json_str = json.dumps({"wps": path_struct})
+    unity_client.send_command(
+            "Waypoints", "SetWaypoints", json_str)
+
 def sigint_handler():
     unity_client.shutdown();
 
@@ -79,7 +93,10 @@ if __name__ == '__main__':
     unity_client = UnityClient(6668)
     unity_client.connect()
 
+    unity_client.send_command("Robot", "Reset", "")
+
     rospy.on_shutdown(sigint_handler)
     rospy.Subscriber("motors", SetMotors, set_motors_callback)
+    rospy.Subscriber("path", Path, path_callback)
     print "Ready"
     rospy.spin()
