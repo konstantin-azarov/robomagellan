@@ -7,6 +7,9 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include "ros/ros.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
+
 #include "average.hpp"
 #define BACKWARD_HAS_DW 1
 #include "backward.hpp"
@@ -126,21 +129,40 @@ int main(int argc, char** argv) {
     raw_calib.write("/tmp/kitti-calib.yml");
   }
 
-  StereoCalibrationData calib(raw_calib);
+  auto scaled_calib = raw_calib.resize(0.5);
+
+  ros::init(argc, argv, "camera_processor");
+  ros::NodeHandle ros_node;
+  ros::AsyncSpinner spinner(1);
+
+  auto odometry_publisher = 
+      ros_node.advertise<geometry_msgs::PoseWithCovarianceStamped>(
+          "odometry", 10);
+
+  spinner.start();
+
+
+  StereoCalibrationData calib(scaled_calib);
   MonoCalibrationData mono_calibration(
     RawMonoCalibrationData::read(mono_calib_file),
     calib.Pl.colRange(0, 3),
     calib.raw.size);
 
-  int frame_width = calib.raw.size.width;
-  int frame_height = calib.raw.size.height;
+  int src_frame_width = raw_calib.size.width;
+  int src_frame_height = raw_calib.size.height;
+  int scaled_frame_width = scaled_calib.size.width;
+  int scaled_frame_height = scaled_calib.size.height;
 
-  cv::Mat frame_mat;
-  //frame_mat.allocator = cv::cuda::HostMem::getAllocator(cv::cuda::HostMem::PAGE_LOCKED);
-  frame_mat.create(frame_height, frame_width*2, CV_8UC1);
+  cv::Mat src_frame_mat;
+  src_frame_mat.create(src_frame_height, src_frame_width*2, CV_8UC1);
+
+  cv::Mat scaled_frame_mat;
+  scaled_frame_mat.create(scaled_frame_height, scaled_frame_width*2, CV_8UC1);
+
   cv::Mat mono_frames[] = {
-    frame_mat(cv::Range::all(), cv::Range(0, frame_width)),
-    frame_mat(cv::Range::all(), cv::Range(frame_width, frame_width*2))
+    scaled_frame_mat(cv::Range::all(), cv::Range(0, scaled_frame_width)),
+    scaled_frame_mat(
+        cv::Range::all(), cv::Range(scaled_frame_width, scaled_frame_width*2))
   };
 
   rdr->skip(start);
@@ -161,16 +183,8 @@ int main(int argc, char** argv) {
 
   CrossFrameDebugData cross_frame_debug_data;
 
-
   CrossFrameProcessorConfig cross_processor_config;
   CrossFrameProcessor cross_processor(calib, cross_processor_config);
-
-  /* DirectionTrackerSettings settings; */
-  /* DirectionTarget target = DirectionTarget::read(direction_file); */
-  /* DirectionTracker direction_tracker(settings, &calib.intrinsics); */
-  /* direction_tracker.setTarget(&target); */
-
-  double frameDt = 1.0/60.0;
 
   int frame_index = -1;
 
@@ -196,9 +210,13 @@ int main(int argc, char** argv) {
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
     Timer timer;
 
-    if (!rdr->nextFrame(frame_mat)) {
+    if (!rdr->nextFrame(src_frame_mat)) {
       break;
     }
+
+    cv::resize(
+        src_frame_mat, scaled_frame_mat, 
+        cv::Size(scaled_calib.size.width * 2, scaled_calib.size.height));
 
     frame_index++;
     global_frame_index++;
@@ -241,7 +259,7 @@ int main(int argc, char** argv) {
       double e2 = t_cov.trace();
       double sigma = sqrt(e2);
       double d = d_t.norm();
-      if (3 * sigma > d * 0.2) {
+      if (3 * sigma > d * 0.2 && d > 0.1) {
         std::cout << "FAIL";
         std::cout << "T_cov = " << t_cov << std::endl; 
         std::cout << "t = " << d_t << std::endl;
@@ -259,23 +277,42 @@ int main(int argc, char** argv) {
         d_t_prev = d_t;
       }
       cam_r.normalize();
-      
-      auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI;
-      std::cout << "yaw = " << ypr.x() 
-                << ", pitch = " << ypr.y() 
-                << ", roll = " << ypr.z() << endl;
-      std::cout << "T = " << cam_t.transpose() << endl; 
-      std::cout << "T_cov = " << t_cov << std::endl;
 
-      if (!ground_truth.empty()) {
-        auto gt = ground_truth[global_frame_index];
-        auto ypr_gt = rotToYawPitchRoll(gt.first);
-        auto t_gt = gt.second;
-        std::cout << "GT: yaw = " << ypr_gt.x() 
-                  << ", pitch = " << ypr_gt.y() 
-                  << ", roll = " << ypr_gt.z() << endl;
-        std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; 
+      geometry_msgs::PoseWithCovarianceStamped msg;
+      msg.header.stamp = ros::Time::now();
+      msg.header.seq = frame_index;
+
+      if (ok) {
+        msg.header.frame_id = "";
+        msg.pose.pose.position.x = d_t.x() / 1E+3;
+        msg.pose.pose.position.y = d_t.y() / 1E+3;
+        msg.pose.pose.position.z = d_t.z() / 1E+3;
+        msg.pose.pose.orientation.x = d_r.x();
+        msg.pose.pose.orientation.y = d_r.y();
+        msg.pose.pose.orientation.z = d_r.z();
+        msg.pose.pose.orientation.w = d_r.w();
+      } else {
+        msg.header.frame_id = "invalid";
       }
+
+      odometry_publisher.publish(msg);
+
+      /* auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI; */
+      /* std::cout << "yaw = " << ypr.x() */ 
+      /*           << ", pitch = " << ypr.y() */ 
+      /*           << ", roll = " << ypr.z() << endl; */
+      /* std::cout << "T = " << cam_t.transpose() << endl; */ 
+      /* std::cout << "T_cov = " << t_cov << std::endl; */
+
+      /* if (!ground_truth.empty()) { */
+      /*   auto gt = ground_truth[global_frame_index]; */
+      /*   auto ypr_gt = rotToYawPitchRoll(gt.first); */
+      /*   auto t_gt = gt.second; */
+      /*   std::cout << "GT: yaw = " << ypr_gt.x() */ 
+      /*             << ", pitch = " << ypr_gt.y() */ 
+      /*             << ", roll = " << ypr_gt.z() << endl; */
+      /*   std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; */ 
+      /* } */
     }
 
     if (trace.is_open()) {
@@ -302,6 +339,9 @@ int main(int argc, char** argv) {
       if (!renderer->loop()) {
         break;
       }
+    } else if (debug == 3) {
+      cv::imshow("debug", mono_frames[0]);
+      cv::waitKey(1);
     }
   }
 

@@ -22,6 +22,8 @@ struct RawStereoCalibrationData {
       const std::string& filename, cv::Size img_size);
   void write(const std::string& filename);
 
+  RawStereoCalibrationData resize(double scale);
+
   cv::Size size;
   CameraCalibrationData left_camera, right_camera;
   cv::Mat R, T;

@@ -57,8 +57,8 @@ class MotionPlanner {
         e::AngleAxisd(-M_PI/2, e::Vector3d(0, 1, 0)) * 
         e::AngleAxisd(M_PI/2, e::Vector3d(1, 0, 0)); 
 
-      speed_.setZero();
-      turn_rate_.setZero();
+      speed_ = 0;
+      turn_rate_ = 0;
     }
 
     void receivePath(const nav_msgs::Path::ConstPtr& path_msg) {
@@ -88,15 +88,20 @@ class MotionPlanner {
 
         auto dp_w = rot_ * dp;
         e::AngleAxisd aa(dr);
-        auto omega_w = rot_ * (aa.axis() * aa.angle() / dt);
         double alpha = 1 - exp(-dt/kSpeedFilterTimeConstant);
 
-        speed_ += alpha * (dp_w/dt - speed_);
-        turn_rate_ += alpha * (omega_w - turn_rate_);
+        if (dt > 0) {
+          speed_ += alpha * (dp_w.norm()/dt - speed_);
+          turn_rate_ += alpha * (-aa.angle() * (rot_ * aa.axis()).z()/dt - turn_rate_);
+        }
 
         /* ROS_INFO("S = (%f, %f, %f)", speed_.x(), speed_.y(), speed_.z()); */
         /* ROS_INFO("W = (%f, %f, %f)", */ 
         /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
+
+        ROS_INFO("DP: (%f, %f, %f) (%f, %f, %f)", 
+            dp.x(), dp.y(), dp.z(),
+            dp_w.x(), dp_w.y(), dp_w.z());
 
         pos_ += dp_w;
         rot_ = rot_ * dr;
@@ -107,13 +112,21 @@ class MotionPlanner {
           /*     speed_.x(), speed_.y(), speed_.z(), */
           /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
 
-          e::AngleAxisd aa_w(turn_rate_.norm()*dt, turn_rate_.normalized());
-          pos_ += speed_ * dt;
-          rot_ = aa_w * rot_;
+
+          ROS_INFO("Turn rate: %f", turn_rate_);
+
+          e::AngleAxisd aa_w = turn_rate_ > 1E-7 ? 
+            e::AngleAxisd(turn_rate_*dt, e::Vector3d(0, 0, -1)) :
+            e::AngleAxisd::Identity();
+
+          /* pos_ += speed_ * dt * (rot_ * e::Vector3d(0, 0, 1)); */
+          /* rot_ = aa_w * rot_; */
         }
       }
 
-      double v = dt > 0 ?  dp.norm() / dt : 0;
+      ROS_INFO("Pose: (%f, %f, %f) (%f, %f, %f, %f)", 
+          pos_.x(), pos_.y(), pos_.z(),
+          rot_.w(), rot_.x(), rot_.y(), rot_.z());
 
       geometry_msgs::Twist cmd_msg;
       double cmd_vel = 0, cmd_turn = 0;
@@ -142,7 +155,7 @@ class MotionPlanner {
                 path_[current_segment_ + 1],
                 t);
 
-            double lookahead = std::max(kLookAheadMin, kLookAheadSecs * v);
+            double lookahead = std::max(kLookAheadMin, kLookAheadSecs * speed_);
             target_point = lookaheadPoint(
                 current_segment_, t, lookahead, target_dir);
           } else {
@@ -162,8 +175,8 @@ class MotionPlanner {
             (current_segment_ == path_.size() - 1) || to_cone, 
             cmd_vel, cmd_turn);
 
-        if (cmd_vel > v) {
-          cmd_vel = std::min(v + kAccelerationMax*dt, cmd_vel);
+        if (cmd_vel > speed_) {
+          cmd_vel = std::min(speed_ + kAccelerationMax*dt, cmd_vel);
         } 
       }
 
@@ -338,7 +351,7 @@ class MotionPlanner {
     // Current position and orientation
     e::Vector3d pos_;
     e::Quaterniond rot_, camera_to_robot_;
-    e::Vector3d speed_, turn_rate_;
+    double speed_, turn_rate_;
 
     // Current cone position and orientation
     e::Vector2d cone_position_;

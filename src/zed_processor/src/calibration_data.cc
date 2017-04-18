@@ -127,6 +127,20 @@ void RawStereoCalibrationData::write(const std::string& filename) {
   cv::write(fs, "T", T);
 }
 
+RawStereoCalibrationData RawStereoCalibrationData::resize(double scale) {
+  RawStereoCalibrationData res;
+
+  res.size = cv::Size(scale * size.width, scale * size.height);
+  res.left_camera.m = left_camera.m * scale;
+  res.left_camera.d = left_camera.d;
+  res.right_camera.m = right_camera.m * scale;
+  res.right_camera.d = right_camera.d;
+  res.R = R;
+  res.T = T;
+
+  return res;
+}
+
 StereoCalibrationData::StereoCalibrationData(
     const RawStereoCalibrationData& raw) {
   this->raw = raw;
