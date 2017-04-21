@@ -1,0 +1,29 @@
+<launch>
+  <node pkg="controller" 
+        name="controller" 
+        type="controller"
+        output="screen">
+    <remap from="motors" to="trex_dmc01/motors_command"/>
+    <param name="k_l" value="1.2"/>
+    <param name="k_r" value="1.2"/>
+    <param name="b" value="0.4"/>
+    <param name="b_v" value="0.1"/>
+  </node>
+
+  <node pkg="trex_dmc01"
+        name="trex_dmc01"
+        type="trex_dmc01"
+        output="screen">
+    <param name="serial_port" value="/dev/ttyUSB0"/>
+  </node>
+
+  <node pkg="zed_processor"
+        name="process"
+        type="process"
+        args="--stereo-calib-file /home/konstantin/dev/robomagellan/utils/data/calib.yml --debug=3"
+        output="screen"/>
+
+  <node pkg="controller"
+        name="manual_control"
+        type="manual_control.py"/>
+</launch>
