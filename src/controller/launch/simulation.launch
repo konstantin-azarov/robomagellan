@@ -13,4 +13,12 @@
         respawn="true"
         respawn_delay="10"
         output="screen"/>
+  <node pkg="controller"
+        name="path_provider"
+        type="path_provider.py">
+      <param name="path_file" value="/home/konstantin/robot_run.kml"/>
+  </node>
+  <node pkg="controller"
+        name="motion_planner"
+        type="motion_planner"/>
 </launch>

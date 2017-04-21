@@ -20,13 +20,14 @@ const double kTurnRateMax = 30 * M_PI/180;
 const double kAccelerationMax = 0.5;
 const double kFinalDistanceThreshold = 0.15;
 
-const double kSpeedFilterTimeConstant = 1;
+const double kSpeedFilterTimeConstant = 0.3;
 
 const double kMaxConeGap = 0.5;
 const double kMinConeAge = 2;
 const double kConeLockDist = 5;
 const double kConeExpectedDist = 25;
 const double kConeFilterTimeConst = 5;
+const double kConeMaxVariance = 5;
 
 class MotionPlanner {
   public:
@@ -59,6 +60,8 @@ class MotionPlanner {
 
       speed_ = 0;
       turn_rate_ = 0;
+      speed_cmd_ = 0;
+      turn_rate_cmd_ =0;
     }
 
     void receivePath(const nav_msgs::Path::ConstPtr& path_msg) {
@@ -112,15 +115,15 @@ class MotionPlanner {
           /*     speed_.x(), speed_.y(), speed_.z(), */
           /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
 
+          double speed = speed_;
+          double turn_rate = turn_rate_;
 
-          ROS_INFO("Turn rate: %f", turn_rate_);
-
-          e::AngleAxisd aa_w = turn_rate_ > 1E-7 ? 
-            e::AngleAxisd(turn_rate_*dt, e::Vector3d(0, 0, -1)) :
+          e::AngleAxisd aa_w = turn_rate > 1E-7 ? 
+            e::AngleAxisd(turn_rate*dt, e::Vector3d(0, 0, -1)) :
             e::AngleAxisd::Identity();
 
-          /* pos_ += speed_ * dt * (rot_ * e::Vector3d(0, 0, 1)); */
-          /* rot_ = aa_w * rot_; */
+          pos_ += speed * dt * (rot_ * e::Vector3d(0, 0, 1));
+          rot_ = aa_w * rot_;
         }
       }
 
@@ -175,8 +178,8 @@ class MotionPlanner {
             (current_segment_ == path_.size() - 1) || to_cone, 
             cmd_vel, cmd_turn);
 
-        if (cmd_vel > speed_) {
-          cmd_vel = std::min(speed_ + kAccelerationMax*dt, cmd_vel);
+        if (cmd_vel > speed_cmd_) {
+          cmd_vel = std::min(speed_cmd_ + kAccelerationMax*dt, cmd_vel);
         } 
       }
 
@@ -187,6 +190,9 @@ class MotionPlanner {
         cmd_msg.linear.z = 0;
         cmd_msg.angular.y = 0;
       }
+
+      speed_cmd_ = cmd_msg.linear.z;
+      turn_rate_cmd_ = cmd_msg.angular.y;
 
       cmd_pub_.publish(cmd_msg);
 
@@ -225,7 +231,7 @@ class MotionPlanner {
       if (t > last_cone_timestamp_ + ros::Duration(kMaxConeGap)) {
         last_cone_timestamp_ = first_cone_timestamp_ = t;
         cone_position_ = cur_cone_pos;
-      } else {
+      } else if ((cur_cone_pos - cone_position_).norm() < kConeMaxVariance) {
         double dt = (t - last_cone_timestamp_).toSec();
         last_cone_timestamp_ = t;
 
@@ -352,6 +358,7 @@ class MotionPlanner {
     e::Vector3d pos_;
     e::Quaterniond rot_, camera_to_robot_;
     double speed_, turn_rate_;
+    double speed_cmd_, turn_rate_cmd_;
 
     // Current cone position and orientation
     e::Vector2d cone_position_;
