@@ -258,10 +258,13 @@ add_executable(
   src/process.cc
   src/bag_video_reader.cc
   src/calibration_data.cc
+  src/camera.cc
+  src/cone_tracker.cc
   src/cross_frame_processor.cc
   src/debug_renderer.cc
   src/direction_target.cc
   src/direction_tracker.cc
+  src/frame_buffer_queue.cc
   src/frame_processor.cc
   src/kitti_video_reader.cc
   src/raw_video_reader.cc
@@ -282,6 +285,7 @@ target_link_libraries(
   ${catkin_LIBRARIES}
   ${CUDA_LIBRARIES} ${CUDA_nppi_LIBRARY} ${CUDA_npps_LIBRARY} nvToolsExt
   ${OpenCV_LIBS}
+  ${libuvc_LIBRARIES}
   ${Boost_LIBRARIES}
 )
 

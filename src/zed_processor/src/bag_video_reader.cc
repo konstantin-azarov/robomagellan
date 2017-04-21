@@ -46,7 +46,7 @@ bool BagVideoReader::nextFrame(cv::Mat& mat) {
   ++iterator_;
 
   if (img->encoding == "bgr8") {
-    cv::cvtColor(img_mat, mat, CV_BGR2GRAY);
+    img_mat.copyTo(mat);
     return true;
   } else {
     ROS_ERROR_STREAM("Unknown image format: " << img->encoding);

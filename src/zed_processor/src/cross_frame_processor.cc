@@ -69,6 +69,10 @@ bool CrossFrameProcessor::process(
   int n_f = tracked_features_.size();
   int n_p = new_features_.size();
 
+  if (n_p == 0) {
+    return false;
+  }
+
   std::cout << "Ego: " << n_f << " " << n_p << std::endl;
 
   bool valid_estimate = true;

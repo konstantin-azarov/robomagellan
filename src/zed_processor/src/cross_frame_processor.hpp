@@ -8,7 +8,7 @@
 #include <set>
 
 #include <opencv2/core.hpp>
-#include <opencv2/cudev/ptr2d/gpumat.hpp>
+#include <opencv2/core/cuda.hpp>
 
 #include "clique.hpp"
 #include "reprojection_estimator.hpp"

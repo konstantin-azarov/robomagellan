@@ -2,6 +2,8 @@
 
 #include "descriptor_tools.hpp"
 
+#include <iostream>
+
 namespace descriptor_tools {
   const int kCopiesPerBlock = 32;
 

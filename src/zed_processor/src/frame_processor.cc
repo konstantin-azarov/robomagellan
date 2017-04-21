@@ -80,17 +80,19 @@ void FrameProcessor::process(
   cv::cuda::Event*  e = events_;
 
   for (int i=0; i < 2; ++i) {
-    src_img_[i].upload(src[i], s[i]);
+    undistorted_image_gpu_[i].upload(src[i], s[i]);
 
-    cv::cuda::remap(
-        src_img_[i], 
-        undistorted_image_gpu_[i], 
-        undistort_map_x_[i],
-        undistort_map_y_[i], 
-        cv::INTER_LINEAR,
-        cv::BORDER_CONSTANT,
-        cv::Scalar(),
-        s[i]);
+    /* src_img_[i].upload(src[i], s[i]); */
+
+    /* cv::cuda::remap( */
+    /*     src_img_[i], */ 
+    /*     undistorted_image_gpu_[i], */ 
+    /*     undistort_map_x_[i], */
+    /*     undistort_map_y_[i], */ 
+    /*     cv::INTER_LINEAR, */
+    /*     cv::BORDER_CONSTANT, */
+    /*     cv::Scalar(), */
+    /*     s[i]); */
      
     fast[i]->computeScores(
         undistorted_image_gpu_[i], threshold_[i], s[i]);
@@ -195,7 +197,10 @@ void FrameProcessor::process(
   std::cout << "Pairs: " << keypoint_pairs_.size() << std::endl;
 
   nvtxRangePop();
-  keypoint_pairs_gpu_.upload(keypoint_pairs_, s[2]);
+
+  if (keypoint_pairs_.size() > 0) {
+    keypoint_pairs_gpu_.upload(keypoint_pairs_, s[2]);
+  }
 
   updateThreshold_(threshold_[0], keypoint_sizes_[0]);
   updateThreshold_(threshold_[1], keypoint_sizes_[1]);
@@ -203,23 +208,27 @@ void FrameProcessor::process(
   s[2].waitEvent(e[0]);
   s[2].waitEvent(e[1]);
 
-  matcher_.computeScores(
-      descriptors_gpu_[0],
-      descriptors_gpu_[1],
-      keypoint_pairs_gpu_,
-      keypoint_pairs_.size(),
-      s[2]);
-
   int n_left = keypoints_cpu_[0].size();
   int n_right = keypoints_cpu_[1].size();
 
-  s[2].waitForCompletion();
+  if (keypoint_pairs_gpu_.size() > 0) {
+    matcher_.computeScores(
+        descriptors_gpu_[0],
+        descriptors_gpu_[1],
+        keypoint_pairs_gpu_,
+        keypoint_pairs_.size(),
+        s[2]);
 
-  matcher_.gatherMatches(
-      n_left, n_right,
-      keypoint_pairs_,
-      0.8,
-      matches_);
+    s[2].waitForCompletion();
+
+    matcher_.gatherMatches(
+        n_left, n_right,
+        keypoint_pairs_,
+        0.8,
+        matches_);
+  } else {
+    matches_.resize(0);
+  }
 
   auto t6 = std::chrono::high_resolution_clock::now();
 
@@ -245,20 +254,24 @@ void FrameProcessor::process(
     }
   }
 
-  matches_.resize(k);
+  if (k > 0) {
+    matches_.resize(k);
 
-  matches_gpu_.upload(matches_, s[2]);
+    std::cout << "matches: " << k << std::endl;
 
-  descriptor_tools::gatherDescriptors(
-      descriptors_gpu_[0],
-      descriptors_gpu_[1],
-      matches_gpu_,
-      matches_.size(),
-      frame_data.d_left,
-      frame_data.d_right,
-      s[2]);
+    matches_gpu_.upload(matches_, s[2]);
 
-  s[2].waitForCompletion();
+    descriptor_tools::gatherDescriptors(
+        descriptors_gpu_[0],
+        descriptors_gpu_[1],
+        matches_gpu_,
+        matches_.size(),
+        frame_data.d_left,
+        frame_data.d_right,
+        s[2]);
+
+    s[2].waitForCompletion();
+  }
 
   auto t7 = std::chrono::high_resolution_clock::now();
   

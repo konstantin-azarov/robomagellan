@@ -15,8 +15,10 @@
 #include "backward.hpp"
 #include "bag_video_reader.hpp"
 #include "calibration_data.hpp"
+#include "camera.hpp"
 #include "clique.hpp"
 #include "cross_frame_processor.hpp"
+#include "cone_tracker.hpp"
 #include "debug_renderer.hpp"
 #include "direction_tracker.hpp"
 #include "direction_target.hpp"
@@ -27,6 +29,7 @@
 #include "reprojection_estimator.hpp"
 #include "rigid_estimator.hpp"
 #include "timer.hpp"
+
 
 using namespace std;
 
@@ -60,6 +63,26 @@ std::vector<Transform> readTransforms(const std::string& filename) {
   }
 
   return res;
+}
+
+cv::Mat monoFrame(const cv::Mat& m, int i) {
+  int w = m.cols/2;
+  return m.colRange(w*i, w*i + w);
+}
+
+void sendCone(ros::Publisher& pub, const e::Vector3d& cone) {
+  geometry_msgs::PoseWithCovarianceStamped msg;
+  msg.header.stamp = ros::Time::now();
+  msg.header.seq = 0;
+  msg.header.frame_id = "camera";
+  msg.pose.pose.position.x = cone.x()/1000.0;
+  msg.pose.pose.position.y = cone.y()/1000.0;
+  msg.pose.pose.position.z = cone.z()/1000.0;
+  msg.pose.pose.orientation.x = 0;
+  msg.pose.pose.orientation.y = 0;
+  msg.pose.pose.orientation.z = 0;
+  msg.pose.pose.orientation.w = 1;
+  pub.publish(msg);
 }
 
 int main(int argc, char** argv) {
@@ -111,14 +134,24 @@ int main(int argc, char** argv) {
   RawStereoCalibrationData raw_calib;
 
   std::unique_ptr<VideoReader> rdr;
+  std::unique_ptr<Camera> camera;
   if (kitti_dataset.empty()) {
-    if (calib_file.empty() || video_file.empty()) {
-      std::cerr << "--calib_file and --video-file should be specified when "
+    if (calib_file.empty()) {
+      std::cerr << "--calib_file should be specified when "
         << "--kitti_dataset is not" << std::endl;
       exit(1);
+    } else {
+      raw_calib = RawStereoCalibrationData::read(calib_file);
+      if (!video_file.empty()) {
+        rdr.reset(new BagVideoReader(video_file, "image_raw"));
+      } else {
+        camera.reset(new Camera());
+        if (!camera->init(raw_calib.size.width*2, raw_calib.size.height, 15)) {
+          ROS_ERROR("Failed to initialize camera");
+          return 1;
+        }
+      }
     }
-    raw_calib = RawStereoCalibrationData::read(calib_file);
-    rdr.reset(new BagVideoReader(video_file, "image_raw"));
   } else {
     auto kitti_reader = new KittiVideoReader(
         kitti_basedir + "/sequences/" + kitti_dataset);
@@ -139,10 +172,13 @@ int main(int argc, char** argv) {
       ros_node.advertise<geometry_msgs::PoseWithCovarianceStamped>(
           "odometry", 10);
 
+  auto cone_publisher =
+      ros_node.advertise<geometry_msgs::PoseWithCovarianceStamped>(
+          "cone", 10);
+
   spinner.start();
 
-
-  StereoCalibrationData calib(scaled_calib);
+  StereoCalibrationData calib(scaled_calib), calib_full(raw_calib);
   MonoCalibrationData mono_calibration(
     RawMonoCalibrationData::read(mono_calib_file),
     calib.Pl.colRange(0, 3),
@@ -153,19 +189,27 @@ int main(int argc, char** argv) {
   int scaled_frame_width = scaled_calib.size.width;
   int scaled_frame_height = scaled_calib.size.height;
 
-  cv::Mat src_frame_mat;
-  src_frame_mat.create(src_frame_height, src_frame_width*2, CV_8UC1);
+  cv::Mat src_frame_mat, camera_frame_mat;
+  camera_frame_mat.create(src_frame_height, src_frame_width*2, CV_8UC2);
+  src_frame_mat.create(src_frame_height, src_frame_width*2, CV_8UC3);
 
-  cv::Mat scaled_frame_mat;
-  scaled_frame_mat.create(scaled_frame_height, scaled_frame_width*2, CV_8UC1);
+  cv::Mat scaled_frame_mat, undistorted_frame_mat, 
+    hsv_frame_mat, gray_frame_mat;
+
+  scaled_frame_mat.create(scaled_frame_height, scaled_frame_width*2, CV_8UC3);
+  undistorted_frame_mat.create(
+      scaled_frame_height, scaled_frame_width*2, CV_8UC3);
+  hsv_frame_mat.create(scaled_frame_height, scaled_frame_width*2, CV_8UC3);
+  gray_frame_mat.create(scaled_frame_height, scaled_frame_width*2, CV_8UC1);
 
   cv::Mat mono_frames[] = {
-    scaled_frame_mat(cv::Range::all(), cv::Range(0, scaled_frame_width)),
-    scaled_frame_mat(
-        cv::Range::all(), cv::Range(scaled_frame_width, scaled_frame_width*2))
+    monoFrame(gray_frame_mat, 0),
+    monoFrame(gray_frame_mat, 1)
   };
 
-  rdr->skip(start);
+  if (rdr) {
+    rdr->skip(start);
+  }
     
   int global_frame_index = start-1;
 
@@ -185,6 +229,9 @@ int main(int argc, char** argv) {
 
   CrossFrameProcessorConfig cross_processor_config;
   CrossFrameProcessor cross_processor(calib, cross_processor_config);
+
+  std::vector<Eigen::Vector3d> cones;
+  ConeTracker cone_tracker(calib);
 
   int frame_index = -1;
 
@@ -210,13 +257,41 @@ int main(int argc, char** argv) {
   while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
     Timer timer;
 
-    if (!rdr->nextFrame(src_frame_mat)) {
+    if (rdr && !rdr->nextFrame(src_frame_mat)) {
       break;
+    } else if (camera) {
+      camera->nextFrame(camera_frame_mat.data);
+      cv::cvtColor(camera_frame_mat, src_frame_mat, CV_YUV2RGB_YVYU);
     }
 
     cv::resize(
         src_frame_mat, scaled_frame_mat, 
         cv::Size(scaled_calib.size.width * 2, scaled_calib.size.height));
+
+    for (int i=0; i < 2; ++i) {
+      cv::remap(
+          monoFrame(scaled_frame_mat, i), 
+          monoFrame(undistorted_frame_mat, i), 
+          calib.undistort_maps[i].x,
+          calib.undistort_maps[i].y,
+          cv::INTER_LINEAR);
+    }
+
+    cv::cvtColor(undistorted_frame_mat, hsv_frame_mat, cv::COLOR_BGR2HSV);
+
+    cv::extractChannel(hsv_frame_mat, gray_frame_mat, 2);
+
+    /* cv::imshow("scaled", scaled_frame_mat); */
+    /* cv::waitKey(0); */
+
+    /* cv::imshow("undistorted", undistorted_frame_mat); */
+    /* cv::waitKey(0); */
+
+    /* cv::imshow("hsv", hsv_frame_mat); */
+    /* cv::waitKey(0); */
+
+    /* cv::imshow("gray", gray_frame_mat); */
+    /* cv::waitKey(0); */
 
     frame_index++;
     global_frame_index++;
@@ -313,6 +388,11 @@ int main(int argc, char** argv) {
       /*             << ", roll = " << ypr_gt.z() << endl; */
       /*   std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; */ 
       /* } */
+    }
+
+    cone_tracker.process(hsv_frame_mat, cones);
+    for (const auto& c : cones) {
+      sendCone(cone_publisher, c);
     }
 
     if (trace.is_open()) {
