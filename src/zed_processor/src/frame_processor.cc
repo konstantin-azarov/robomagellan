@@ -194,7 +194,7 @@ void FrameProcessor::process(
       config_.max_keypoint_pairs,
       keypoint_pairs_);
 
-  std::cout << "Pairs: " << keypoint_pairs_.size() << std::endl;
+  /* std::cout << "Pairs: " << keypoint_pairs_.size() << std::endl; */
 
   nvtxRangePop();
 
@@ -257,7 +257,7 @@ void FrameProcessor::process(
   if (k > 0) {
     matches_.resize(k);
 
-    std::cout << "matches: " << k << std::endl;
+    /* std::cout << "matches: " << k << std::endl; */
 
     matches_gpu_.upload(matches_, s[2]);
 
@@ -275,14 +275,14 @@ void FrameProcessor::process(
 
   auto t7 = std::chrono::high_resolution_clock::now();
   
-  std::cout
-    << " features = (" << n_left << ", " << n_right << ")"
-    << " n_pairs = " << keypoint_pairs_.size()
-    << " n_points = " << frame_data.points.size()
-    << " upload = " << duration_cast<milliseconds>(t1 - t0).count()
-    << " integral = " << duration_cast<milliseconds>(t3 - t2).count()
-    << " total = " << duration_cast<milliseconds>(t7 - t0).count()
-    << std::endl;
+  /* std::cout */
+  /*   << " features = (" << n_left << ", " << n_right << ")" */
+  /*   << " n_pairs = " << keypoint_pairs_.size() */
+  /*   << " n_points = " << frame_data.points.size() */
+  /*   << " upload = " << duration_cast<milliseconds>(t1 - t0).count() */
+  /*   << " integral = " << duration_cast<milliseconds>(t3 - t2).count() */
+  /*   << " total = " << duration_cast<milliseconds>(t7 - t0).count() */
+  /*   << std::endl; */
 
   nvtxRangePop();
 

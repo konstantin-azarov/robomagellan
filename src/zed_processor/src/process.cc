@@ -296,7 +296,7 @@ int main(int argc, char** argv) {
     frame_index++;
     global_frame_index++;
     
-    std::cout << "Frame #" << global_frame_index << std::endl;
+    /* std::cout << "Frame #" << global_frame_index << std::endl; */
 
     timer.mark("read");
 
@@ -334,11 +334,11 @@ int main(int argc, char** argv) {
       double e2 = t_cov.trace();
       double sigma = sqrt(e2);
       double d = d_t.norm();
-      if (3 * sigma > d * 0.2 && d > 0.1) {
-        std::cout << "FAIL";
-        std::cout << "T_cov = " << t_cov << std::endl; 
-        std::cout << "t = " << d_t << std::endl;
-        std::cout << "speed = " << d << std::endl;
+      if (3 * sigma > d * 0.2 && d > 50) {
+        /* std::cout << "FAIL"; */
+        /* std::cout << "T_cov = " << t_cov << std::endl; */ 
+        /* std::cout << "t = " << d_t << std::endl; */
+        /* std::cout << "speed = " << d << std::endl; */
         ok = false;
 
         cam_t += cam_r*d_t_prev;
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
       }
       trace << std::endl;
     }
-    std::cout << "Times: " << timer.str() << std::endl;
+    /* std::cout << "Times: " << timer.str() << std::endl; */
 
     if (frame_index > 0 && (debug == 2 || (debug == 1 && !ok))) {
       std::unique_ptr<DebugRenderer> renderer(DebugRenderer::create(

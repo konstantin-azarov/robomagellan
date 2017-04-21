@@ -73,7 +73,7 @@ bool CrossFrameProcessor::process(
     return false;
   }
 
-  std::cout << "Ego: " << n_f << " " << n_p << std::endl;
+  /* std::cout << "Ego: " << n_f << " " << n_p << std::endl; */
 
   bool valid_estimate = true;
 
@@ -117,11 +117,11 @@ bool CrossFrameProcessor::process(
       }
     }
 
-    std::cout << "Near = " << near_features_.size() 
-              << ", Far = " << far_features_.size() << std::endl;
+    /* std::cout << "Near = " << near_features_.size() */ 
+    /*           << ", Far = " << far_features_.size() << std::endl; */
 
     selectInitialEstimationFeatures_();
-    std::cout << "Estimation = " << estimation_features_.size() << std::endl;
+    /* std::cout << "Estimation = " << estimation_features_.size() << std::endl; */
 
 
     if (!estimatePose_(r, t, t_cov)) {
@@ -130,7 +130,7 @@ bool CrossFrameProcessor::process(
 
     if (valid_estimate) {
       selectFinalEstimationFeatures_();
-      std::cout << "Final = " << estimation_features_.size() << std::endl;
+      /* std::cout << "Final = " << estimation_features_.size() << std::endl; */
       valid_estimate = estimatePose_(r, t, t_cov);
     }
   } else {
@@ -173,8 +173,8 @@ bool CrossFrameProcessor::process(
 
   auto t4 = std::chrono::high_resolution_clock::now();
 
-  std::cout << "Odometry stats: " << std::endl;
-  std::cout << "  tracked = " << tracked_features_.size() << std::endl;
+  /* std::cout << "Odometry stats: " << std::endl; */
+  /* std::cout << "  tracked = " << tracked_features_.size() << std::endl; */
 
  /* std::cout */ 
   /*   << "matches = " << full_matches_.size() */ 
@@ -536,8 +536,8 @@ void CrossFrameProcessor::fillReprojectionFeatures_() {
     reprojection_features_.push_back(rf);
   }
 
-  std::cout << "Reprojection features: " << reprojection_features_.size() 
-    << std::endl;
+  /* std::cout << "Reprojection features: " << reprojection_features_.size() */ 
+  /*   << std::endl; */
 }
 
 double CrossFrameProcessor::fillReprojectionErrors_(
