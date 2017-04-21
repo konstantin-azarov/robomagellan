@@ -1,5 +1,5 @@
 uint8 state
-int8[5] channels
+uint16[5] channels
 
 uint8 STATE_NOT_FOUND = 1
 uint8 STATE_ERROR = 2

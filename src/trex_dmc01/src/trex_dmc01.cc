@@ -2,14 +2,15 @@
 #include "trex_dmc01/Status.h"
 #include "trex_dmc01/SetMotors.h"
 
-#include <boost/asio.hpp>
 #include <boost/format.hpp>
 #include <stdexcept>
+
+#include <fcntl.h>
+#include <termios.h>
 
 #include <string>
 #include <iostream>
 
-namespace asio = boost::asio;
 using boost::format;
 
 using namespace std;
@@ -20,18 +21,39 @@ struct TrexException : public std::runtime_error {
 
 class TrexDriver {
   public:
-    TrexDriver(const std::string& port_name, int timeout_ms) 
-        : port_(io_), timeout_(boost::posix_time::milliseconds(timeout_ms)) {
-      port_.open(port_name);
-      port_.set_option(asio::serial_port_base::baud_rate(19200));
-      port_.set_option(
-          asio::serial_port_base::stop_bits(
-            asio::serial_port_base::stop_bits::one));
-      port_.set_option(
-          asio::serial_port_base::parity(asio::serial_port_base::parity::none));
-      port_.set_option(
-          asio::serial_port_base::flow_control(
-            asio::serial_port_base::flow_control::none));
+    TrexDriver(const std::string& port_name, int timeout_ms) {
+
+      port_fd_ = open(port_name.c_str(), O_RDWR | O_NOCTTY | O_SYNC);
+      if (port_fd_ < 0) {
+        throw TrexException("Failed to open serial port");
+      }
+
+      termios tty;
+      if (tcgetattr(port_fd_, &tty) != 0) {
+        throw TrexException("tcgetattr failed");
+      }
+
+      cfsetospeed (&tty, B19200);
+      cfsetispeed (&tty, B19200);
+
+      tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
+      tty.c_iflag &= ~IGNBRK;         // disable break processing
+      tty.c_lflag = 0;                // no signaling chars, no echo,
+                                      // no canonical processing
+      tty.c_oflag = 0;                // no remapping, no delays
+      tty.c_cc[VMIN]  = 0;            // read doesn't block
+      tty.c_cc[VTIME] = std::min(1, timeout_ms / 100);
+      tty.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
+      tty.c_cflag |= (CLOCAL | CREAD); // ignore modem controls,
+                                       // enable reading
+      tty.c_cflag &= ~(PARENB | PARODD);      // no parity
+      tty.c_cflag |= 0;
+      tty.c_cflag &= ~CSTOPB;   // one stop bit
+      tty.c_cflag &= ~CRTSCTS;  // no hardware flow control
+
+      if (tcsetattr(port_fd_, TCSANOW, &tty) != 0) {
+        throw TrexException("tcsetattr failed");
+      }
 
       std::string signature(reinterpret_cast<char*>(command<7>(0x81).data()));
       
@@ -63,11 +85,10 @@ class TrexDriver {
             throw TrexException("Unexpected response to the 0x83 command");
         }
 
-        auto channels = command<5>(0x87, 0x1F);
+        auto channels = command<10>(0x86, 0x1F);
 
         for (int i = 0; i < 5; ++i) {
-          auto v = channels[i];
-          res.channels[i] = (v & 0x3F) * ((v >> 7) ? -1 : 1);
+          res.channels[i] = channels[i*2] + (channels[i*2 + 1] << 8);
         }
       }
 
@@ -102,43 +123,21 @@ class TrexDriver {
 
     template <int N, int M>
     boost::array<uint8_t, N> command(boost::array<uint8_t, M> cmd) {
-      boost::array<uint8_t, M> echo;
       boost::array<uint8_t, N> response;
 
-      boost::system::error_code error_code;
-
-      io_.reset();
-
-      asio::deadline_timer timer(io_);
-
-      boost::asio::write(port_, boost::asio::buffer(cmd));
-      boost::asio::async_read(
-          port_, 
-          boost::array<asio::mutable_buffer, 2> { 
-            boost::asio::buffer(echo), 
-            boost::asio::buffer(response) },
-          [&](
-            const boost::system::error_code& error, 
-            std::size_t n_bytes) {
-              error_code.assign(error.value(), error.category());
-              timer.cancel();
-            });
-
-      timer.expires_from_now(timeout_);
-      timer.async_wait(
-          [&](const boost::system::error_code& error) {
-            port_.cancel();
-          });
-
-      io_.run();
-
-      if (error_code.value() != boost::system::errc::success) {
-        throw TrexException(str(format(
-                "Read from controller failed: %1%") % error_code.message()));
+      if (write(port_fd_, cmd.data(), cmd.size()) != cmd.size()) {
+        throw TrexException("Write failed");
       }
 
-      if (echo != cmd) {
-        throw TrexException("Invalid echo received from the controller");
+      int nread = 0, cnt;
+      
+      while (nread < N &&
+             (cnt = read(port_fd_, response.data() + nread, N - nread)) > 0) {
+        nread += cnt;
+      }
+
+      if (nread != response.size()) {
+        throw TrexException(str(format("Read failed: %1%") % nread));
       }
 
       return response;
@@ -146,9 +145,7 @@ class TrexDriver {
 
 
   private:
-    asio::io_service io_;
-    asio::serial_port port_; 
-    boost::posix_time::time_duration timeout_;
+    int port_fd_;
 };
 
 template <class T>
@@ -168,7 +165,7 @@ void run() {
 
   TrexDriver driver(
       getParam<std::string>(node, "serial_port"),
-      node.param("timeout_ms", 300));
+      node.param("timeout_ms", 100));
 
   auto pub = node.advertise<trex_dmc01::Status>("status", 10);
 

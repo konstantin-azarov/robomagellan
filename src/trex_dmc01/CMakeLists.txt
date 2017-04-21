@@ -10,7 +10,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
 )
 
-set(CMAKE_CXX_FLAGS "-std=c++11")
+set(CMAKE_CXX_FLAGS "-std=c++11 -g")
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
