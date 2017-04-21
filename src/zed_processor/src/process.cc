@@ -179,10 +179,10 @@ int main(int argc, char** argv) {
   spinner.start();
 
   StereoCalibrationData calib(scaled_calib), calib_full(raw_calib);
-  MonoCalibrationData mono_calibration(
-    RawMonoCalibrationData::read(mono_calib_file),
-    calib.Pl.colRange(0, 3),
-    calib.raw.size);
+  /* MonoCalibrationData mono_calibration( */
+  /*   RawMonoCalibrationData::read(mono_calib_file), */
+  /*   calib.Pl.colRange(0, 3), */
+  /*   calib.raw.size); */
 
   int src_frame_width = raw_calib.size.width;
   int src_frame_height = raw_calib.size.height;
@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
   e::Vector3d d_t, d_t_prev(0, 0, 0);
 
   bool done = false;
-  while (!done && (frame_count == 0 || frame_index + 1 < frame_count)) {
+  while (!done && (frame_count == 0 || frame_index + 1 < frame_count) && ros::ok()) {
     Timer timer;
 
     if (rdr && !rdr->nextFrame(src_frame_mat)) {
@@ -423,6 +423,8 @@ int main(int argc, char** argv) {
       cv::imshow("debug", mono_frames[0]);
       cv::waitKey(1);
     }
+
+    ros::spinOnce();
   }
 
   return 0;

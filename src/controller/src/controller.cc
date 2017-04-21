@@ -61,7 +61,9 @@ class Controller {
         double yaw_r =  
           s > 1E-5 ? (angle * pose.orientation.y / s) / dt : 0;
 
-        updateFilter_(speed, 0.1, yaw_r, 0.02);
+        /* ROS_INFO("Yaw rate: %f %f", yaw_r, speed); */
+
+        updateFilter_(speed, 0.1, yaw_r, 0.1);
         updateControl_();
         sendControl_();
 
@@ -137,6 +139,8 @@ class Controller {
 
       s_ = s_ - k * f;
       p_ = (e::Matrix3f::Identity() - k * m) * p_;
+
+      /* ROS_INFO("Base variance: %f", p_(2, 2)); */
     }
 
   private:

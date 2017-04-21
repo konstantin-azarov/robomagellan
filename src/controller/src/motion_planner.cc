@@ -75,6 +75,10 @@ class MotionPlanner {
     
     void receiveOdometry(
         const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose_msg) {
+
+      bool heartbeat_active = 
+        (ros::Time::now() - heartbeat_time_).toSec() < kHeartbeatTimeout;
+
       auto time = ros::Time::now();
       double dt = (pose_msg->header.stamp - last_update_).toSec();
       last_update_ = pose_msg->header.stamp;
@@ -82,54 +86,56 @@ class MotionPlanner {
       const auto& pose = pose_msg->pose.pose;
       e::Vector3d dp(pose.position.x, pose.position.y, pose.position.z);
 
-      if (pose_msg->header.frame_id != "invalid") {
-        e::Quaterniond dr(
-            pose.orientation.w,
-            pose.orientation.x,
-            pose.orientation.y,
-            pose.orientation.z);
+      if (heartbeat_active) {
+        if (pose_msg->header.frame_id != "invalid") {
+          e::Quaterniond dr(
+              pose.orientation.w,
+              pose.orientation.x,
+              pose.orientation.y,
+              pose.orientation.z);
 
-        auto dp_w = rot_ * dp;
-        e::AngleAxisd aa(dr);
-        double alpha = 1 - exp(-dt/kSpeedFilterTimeConstant);
+          auto dp_w = rot_ * dp;
+          e::AngleAxisd aa(dr);
+          double alpha = 1 - exp(-dt/kSpeedFilterTimeConstant);
 
-        if (dt > 0) {
-          speed_ += alpha * (dp_w.norm()/dt - speed_);
-          turn_rate_ += alpha * (-aa.angle() * (rot_ * aa.axis()).z()/dt - turn_rate_);
-        }
+          if (dt > 0) {
+            speed_ += alpha * (dp_w.norm()/dt - speed_);
+            turn_rate_ += alpha * (-aa.angle() * (rot_ * aa.axis()).z()/dt - turn_rate_);
+          }
 
-        /* ROS_INFO("S = (%f, %f, %f)", speed_.x(), speed_.y(), speed_.z()); */
-        /* ROS_INFO("W = (%f, %f, %f)", */ 
-        /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
-
-        ROS_INFO("DP: (%f, %f, %f) (%f, %f, %f)", 
-            dp.x(), dp.y(), dp.z(),
-            dp_w.x(), dp_w.y(), dp_w.z());
-
-        pos_ += dp_w;
-        rot_ = rot_ * dr;
-        rot_.normalize();
-      } else {
-        if (dt > 0) {
-          /* ROS_INFO("Interpolate (%f, %f, %f) (%f, %f, %f)", */
-          /*     speed_.x(), speed_.y(), speed_.z(), */
+          /* ROS_INFO("S = (%f, %f, %f)", speed_.x(), speed_.y(), speed_.z()); */
+          /* ROS_INFO("W = (%f, %f, %f)", */ 
           /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
 
-          double speed = speed_;
-          double turn_rate = turn_rate_;
+          /* ROS_INFO("DP: (%f, %f, %f) (%f, %f, %f)", */ 
+          /*     dp.x(), dp.y(), dp.z(), */
+          /*     dp_w.x(), dp_w.y(), dp_w.z()); */
 
-          e::AngleAxisd aa_w = turn_rate > 1E-7 ? 
-            e::AngleAxisd(turn_rate*dt, e::Vector3d(0, 0, -1)) :
-            e::AngleAxisd::Identity();
+          pos_ += dp_w;
+          rot_ = rot_ * dr;
+          rot_.normalize();
+        } else {
+          if (dt > 0) {
+            /* ROS_INFO("Interpolate (%f, %f, %f) (%f, %f, %f)", */
+            /*     speed_.x(), speed_.y(), speed_.z(), */
+            /*     turn_rate_.x(), turn_rate_.y(), turn_rate_.z()); */
 
-          pos_ += speed * dt * (rot_ * e::Vector3d(0, 0, 1));
-          rot_ = aa_w * rot_;
+            double speed = speed_;
+            double turn_rate = turn_rate_;
+
+            e::AngleAxisd aa_w = turn_rate > 1E-7 ? 
+              e::AngleAxisd(turn_rate*dt, e::Vector3d(0, 0, -1)) :
+              e::AngleAxisd::Identity();
+
+            pos_ += speed * dt * (rot_ * e::Vector3d(0, 0, 1));
+            rot_ = aa_w * rot_;
+          }
         }
       }
 
-      ROS_INFO("Pose: (%f, %f, %f) (%f, %f, %f, %f)", 
-          pos_.x(), pos_.y(), pos_.z(),
-          rot_.w(), rot_.x(), rot_.y(), rot_.z());
+      /* ROS_INFO("Pose: (%f, %f, %f) (%f, %f, %f, %f)", */ 
+      /*     pos_.x(), pos_.y(), pos_.z(), */
+      /*     rot_.w(), rot_.x(), rot_.y(), rot_.z()); */
 
       geometry_msgs::Twist cmd_msg;
       double cmd_vel = 0, cmd_turn = 0;
@@ -183,7 +189,7 @@ class MotionPlanner {
         } 
       }
 
-      if ((ros::Time::now() - heartbeat_time_).toSec() < kHeartbeatTimeout) {
+      if (heartbeat_active) {
         cmd_msg.linear.z = cmd_vel;
         cmd_msg.angular.y = cmd_turn;
       } else {

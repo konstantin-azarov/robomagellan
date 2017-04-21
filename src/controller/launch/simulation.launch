@@ -6,6 +6,7 @@
       <param name="k_l" value="1.2"/>
       <param name="k_r" value="1.2"/>
       <param name="b" value="0.4"/>
+      <param name="b_v" value="0.1"/>
   </node>
   <node pkg="unity_glue" 
         name="unity_glue" 
