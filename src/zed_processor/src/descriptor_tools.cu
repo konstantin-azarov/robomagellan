@@ -68,10 +68,15 @@ namespace descriptor_tools {
       int n,
       cv::cudev::GpuMat_<uint8_t>& d_compact,
       cv::cuda::Stream& stream) {
+    if (n == 0) {
+      return;
+    }
+
     auto s = cv::cuda::StreamAccessor::getStream(stream);
     dim3 blockDim(32, kCopiesPerBlock);
     gatherGpuPtrs<<<divUp(n, kCopiesPerBlock), blockDim, 0, s>>>(
         descs, d_compact);
+    cudaSafeCall(cudaGetLastError());
   }
 
   const int kDescsPerBlock = 8;

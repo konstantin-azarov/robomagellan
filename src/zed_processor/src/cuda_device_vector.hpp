@@ -114,9 +114,11 @@ class CudaDeviceVector {
     template <class A>
     __host__ void upload(std::vector<T, A>& src) {
       upload_size_ = src.size();
-      cudaSafeCall(cudaMemcpy(
-            dev_.ptr_, src.data(), sizeof(T)*src.size(),
-            cudaMemcpyHostToDevice));
+      if (upload_size_ > 0) {
+        cudaSafeCall(cudaMemcpy(
+              dev_.ptr_, src.data(), sizeof(T)*src.size(),
+              cudaMemcpyHostToDevice));
+      }
       cudaSafeCall(cudaMemcpy(
             dev_.size_ptr_, &upload_size_, sizeof(int),
             cudaMemcpyHostToDevice));
@@ -125,10 +127,12 @@ class CudaDeviceVector {
     template <class A>
     __host__ void upload(std::vector<T, A>& src, cv::cuda::Stream& s) {
       upload_size_ = src.size();
-      cudaSafeCall(cudaMemcpyAsync(
-            dev_.ptr_, src.data(), sizeof(T)*src.size(),
-            cudaMemcpyHostToDevice,
-            cv::cuda::StreamAccessor::getStream(s)));
+      if (upload_size_ > 0) {
+        cudaSafeCall(cudaMemcpyAsync(
+              dev_.ptr_, src.data(), sizeof(T)*src.size(),
+              cudaMemcpyHostToDevice,
+              cv::cuda::StreamAccessor::getStream(s)));
+      }
       cudaSafeCall(cudaMemcpyAsync(
             dev_.size_ptr_, &upload_size_, sizeof(int),
             cudaMemcpyHostToDevice,

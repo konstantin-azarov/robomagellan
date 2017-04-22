@@ -177,12 +177,14 @@ void FrameProcessor::process(
     keypoints_gpu[i]->upload(keypoints_cpu_[i], s[i]);
     nvtxRangePop();
 
-    freak_.describe(
-        integral_image_gpu_[i], 
-        *keypoints_gpu[i],
-        keypoints_cpu_[i].size(),
-        descriptors_gpu_[i],
-        s[i]);
+    if (keypoints_cpu_[i].size() > 0) {
+      freak_.describe(
+          integral_image_gpu_[i], 
+          *keypoints_gpu[i],
+          keypoints_cpu_[i].size(),
+          descriptors_gpu_[i],
+          s[i]);
+    }
 
     e[i].record(s[i]);
   }
@@ -198,9 +200,7 @@ void FrameProcessor::process(
 
   nvtxRangePop();
 
-  if (keypoint_pairs_.size() > 0) {
-    keypoint_pairs_gpu_.upload(keypoint_pairs_, s[2]);
-  }
+  keypoint_pairs_gpu_.upload(keypoint_pairs_, s[2]);
 
   updateThreshold_(threshold_[0], keypoint_sizes_[0]);
   updateThreshold_(threshold_[1], keypoint_sizes_[1]);

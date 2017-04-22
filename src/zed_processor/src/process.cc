@@ -376,24 +376,6 @@ int main(int argc, char** argv) {
       }
       cam_r.normalize();
 
-      geometry_msgs::PoseWithCovarianceStamped msg;
-      msg.header.stamp = ros::Time::now();
-      msg.header.seq = frame_index;
-
-      if (ok) {
-        msg.header.frame_id = "";
-        msg.pose.pose.position.x = d_t.x() / 1E+3;
-        msg.pose.pose.position.y = d_t.y() / 1E+3;
-        msg.pose.pose.position.z = d_t.z() / 1E+3;
-        msg.pose.pose.orientation.x = d_r.x();
-        msg.pose.pose.orientation.y = d_r.y();
-        msg.pose.pose.orientation.z = d_r.z();
-        msg.pose.pose.orientation.w = d_r.w();
-      } else {
-        msg.header.frame_id = "invalid";
-      }
-
-      odometry_publisher.publish(msg);
 
       /* auto ypr = rotToYawPitchRoll(cam_r) * 180.0 / M_PI; */
       /* std::cout << "yaw = " << ypr.x() */ 
@@ -412,6 +394,25 @@ int main(int argc, char** argv) {
       /*   std::cout << "GT: T = " << t_gt.transpose() * 1000 << endl; */ 
       /* } */
     }
+
+    geometry_msgs::PoseWithCovarianceStamped msg;
+    msg.header.stamp = ros::Time::now();
+    msg.header.seq = frame_index;
+
+    if (ok) {
+      msg.header.frame_id = "";
+      msg.pose.pose.position.x = d_t.x() / 1E+3;
+      msg.pose.pose.position.y = d_t.y() / 1E+3;
+      msg.pose.pose.position.z = d_t.z() / 1E+3;
+      msg.pose.pose.orientation.x = d_r.x();
+      msg.pose.pose.orientation.y = d_r.y();
+      msg.pose.pose.orientation.z = d_r.z();
+      msg.pose.pose.orientation.w = d_r.w();
+    } else {
+      msg.header.frame_id = "invalid";
+    }
+
+    odometry_publisher.publish(msg);
 
     cone_tracker.process(hsv_frame_mat, cones);
     for (const auto& c : cones) {
