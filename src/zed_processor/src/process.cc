@@ -9,6 +9,7 @@
 
 #include "ros/ros.h"
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
+#include "sensor_msgs/Image.h"
 
 #include "average.hpp"
 #define BACKWARD_HAS_DW 1
@@ -83,6 +84,24 @@ void sendCone(ros::Publisher& pub, const e::Vector3d& cone) {
   msg.pose.pose.orientation.z = 0;
   msg.pose.pose.orientation.w = 1;
   pub.publish(msg);
+}
+
+void publishImage(ros::Publisher& pub, const cv::Mat& mat) {
+  sensor_msgs::Image img;
+  img.header.seq = 0;
+  img.header.stamp = ros::Time::now();
+  img.header.frame_id = "camera";
+  img.height = mat.rows;
+  img.width = mat.cols;
+  img.encoding = "bgr8";
+  img.is_bigendian = false;
+  img.step = mat.step;
+
+  int n = mat.rows * mat.step;
+  img.data.resize(n);
+  std::copy(mat.data, mat.data + n, img.data.begin());
+
+  pub.publish(img);
 }
 
 int main(int argc, char** argv) {
@@ -175,6 +194,10 @@ int main(int argc, char** argv) {
   auto cone_publisher =
       ros_node.advertise<geometry_msgs::PoseWithCovarianceStamped>(
           "cone", 10);
+
+  auto image_publisher =
+      ros_node.advertise<sensor_msgs::Image>(
+          "image_undistorted", 10);
 
   spinner.start();
 
@@ -422,7 +445,10 @@ int main(int argc, char** argv) {
     } else if (debug == 3) {
       cv::imshow("debug", mono_frames[0]);
       cv::waitKey(1);
+    } else if (debug == 4) {
+      publishImage(image_publisher, scaled_frame_mat);
     }
+
 
     ros::spinOnce();
   }

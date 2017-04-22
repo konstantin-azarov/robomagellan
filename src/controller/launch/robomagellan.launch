@@ -24,7 +24,7 @@
   <node pkg="zed_processor"
         name="process"
         type="process"
-        args="--stereo-calib-file /home/konstantin/dev/robomagellan/utils/data/calib.yml --debug=3"
+        args="--stereo-calib-file /home/konstantin/dev/robomagellan/utils/data/calib.yml --debug=4"
         output="screen"/>
 
   <node pkg="controller"
