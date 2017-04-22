@@ -15,7 +15,7 @@ def loadPath(filename):
 
     kml_doc = ElementTree.parse("/home/konstantin/robot_run.kml")
 
-    placemark = kml_doc.find(".//kml:Placemark[kml:name='Robot run']", ns)
+    placemark = kml_doc.find(".//kml:Placemark[kml:name='robot_path']", ns)
 
     line = placemark.find("./kml:LineString/kml:coordinates", ns)
 

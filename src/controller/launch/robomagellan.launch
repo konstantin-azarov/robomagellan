@@ -4,10 +4,10 @@
         type="controller"
         output="screen">
     <remap from="motors" to="trex_dmc01/motors_command"/>
-    <param name="k_l" value="1.2"/>
-    <param name="k_r" value="1.2"/>
-    <param name="b" value="0.4"/>
-    <param name="b_v" value="0.1"/>
+    <param name="k_l" value="2.22"/>
+    <param name="k_r" value="2.22"/>
+    <param name="b" value="3.14"/>
+    <param name="b_v" value="0.4"/>
   </node>
 
   <node pkg="trex_dmc01"
